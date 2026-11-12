@@ -58,10 +58,13 @@ export const ShotHatClose: React.FC = () => {
 };
 
 /** Distor from the front (Ben's drawing as a puppet): blinks, nods, talks. */
-export const ShotDistorFront: React.FC<{ talkFrom?: number; talkTo?: number; blinks?: number[] }> = ({
+type MouthFn = (frame: number) => number;
+
+export const ShotDistorFront: React.FC<{ talkFrom?: number; talkTo?: number; blinks?: number[]; mouthFn?: MouthFn }> = ({
   talkFrom = 50,
   talkTo = 120,
   blinks = [30, 135, 200],
+  mouthFn,
 }) => {
   const { frame } = useProgress();
   return (
@@ -72,7 +75,7 @@ export const ShotDistorFront: React.FC<{ talkFrom?: number; talkTo?: number; bli
         y={-10}
         height={1500}
         blink={blinkAt(frame, blinks)}
-        mouth={talk(frame, talkFrom, talkTo)}
+        mouth={mouthFn ? mouthFn(frame) : talk(frame, talkFrom, talkTo)}
         tilt={sway(frame, 1.6, 140)}
         nod={Math.max(0, sway(frame, 10, 90))}
       />
@@ -81,11 +84,12 @@ export const ShotDistorFront: React.FC<{ talkFrom?: number; talkTo?: number; bli
 };
 
 /** Distor side view, close: `facing` right shows the tear side. */
-export const ShotDistorSide: React.FC<{ facing?: "left" | "right"; talkFrom?: number; talkTo?: number; blinks?: number[] }> = ({
+export const ShotDistorSide: React.FC<{ facing?: "left" | "right"; talkFrom?: number; talkTo?: number; blinks?: number[]; mouthFn?: MouthFn }> = ({
   facing = "right",
   talkFrom = -1,
   talkTo = -1,
   blinks = [25, 110],
+  mouthFn,
 }) => {
   const { frame } = useProgress();
   const h = 1700;
@@ -95,14 +99,14 @@ export const ShotDistorSide: React.FC<{ facing?: "left" | "right"; talkFrom?: nu
     <Camera to={1.06} origin={facing === "right" ? "40% 40%" : "60% 40%"}>
       <City soft pan={facing === "right" ? 80 : -60} />
       <div style={{ position: "absolute", left: x, top: -130, width: w, height: h }}>
-        <DistorSide uid="side" facing={facing} blink={blinkAt(frame, blinks)} mouth={talk(frame, talkFrom, talkTo)} tilt={sway(frame, 1.5, 120)} />
+        <DistorSide uid="side" facing={facing} blink={blinkAt(frame, blinks)} mouth={mouthFn ? mouthFn(frame) : talk(frame, talkFrom, talkTo)} tilt={sway(frame, 1.5, 120)} />
       </div>
     </Camera>
   );
 };
 
 /** Two-shot: hat character (left, facing right) and Distor (right, facing left). */
-export const ShotTwo: React.FC<{ talkFrom?: number; talkTo?: number }> = ({ talkFrom = 40, talkTo = 110 }) => {
+export const ShotTwo: React.FC<{ talkFrom?: number; talkTo?: number; mouthFn?: MouthFn }> = ({ talkFrom = 40, talkTo = 110, mouthFn }) => {
   const { frame, p } = useProgress();
   const h = 1250;
   const w = (h * 1200) / 1600;
@@ -113,7 +117,7 @@ export const ShotTwo: React.FC<{ talkFrom?: number; talkTo?: number }> = ({ talk
         <Tear at={HAT.tearEnd} run={150} cycle={80} delay={25} />
       </Character>
       <div style={{ position: "absolute", left: 1920 - w + 120, top: 60, width: w, height: h }}>
-        <DistorSide uid="two" facing="left" blink={blinkAt(frame, [70, 150])} mouth={talk(frame, talkFrom, talkTo)} tilt={sway(frame, 1.2, 110, 1)} />
+        <DistorSide uid="two" facing="left" blink={blinkAt(frame, [70, 150])} mouth={mouthFn ? mouthFn(frame) : talk(frame, talkFrom, talkTo)} tilt={sway(frame, 1.2, 110, 1)} />
       </div>
     </Camera>
   );
