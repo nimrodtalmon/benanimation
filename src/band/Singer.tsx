@@ -62,7 +62,7 @@ export const Singer: React.FC<{ t: number }> = ({ t }) => {
   const sec = sectionAt(t);
   const v = voice(t);
   const beatPhase = (t % SPB) / SPB;
-  const bounce = (sec === "chorus" ? 9 : 5) * Math.pow(Math.sin(Math.PI * beatPhase), 2); // dip on each beat
+  const bounce = (sec === "chorus" ? 9 : 5) * Math.pow(Math.cos(Math.PI * beatPhase), 2); // dip on each beat
   const sway = Math.sin((t / (SPB * 4)) * Math.PI * 2) * 3;
 
   // hips and torso

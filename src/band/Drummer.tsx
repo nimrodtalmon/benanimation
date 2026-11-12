@@ -106,7 +106,7 @@ const Cymbal: React.FC<{ c: V; rx: number; deg: number; stand?: number }> = ({ c
 
 export const Drummer: React.FC<{ t: number }> = ({ t }) => {
   const beatPhase = (t % SPB) / SPB;
-  const nod = 6 * Math.pow(Math.sin(Math.PI * beatPhase), 2);
+  const nod = 6 * Math.pow(Math.cos(Math.PI * beatPhase), 2);
   const kick = decay(t, KICK_T, 0.08);
   const hip: V = [960, 700 + kick * 4];
   const torsoDeg = Math.sin(t * 1.7) * 1.5 + kick * 1.5;

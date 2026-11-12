@@ -5,6 +5,7 @@ import { TEST2C_FRAMES, Test2a, Test2b, Test2c } from "./shots/Test2";
 import { Test3 } from "./clip/Test3";
 import { SONG_FRAMES } from "./clip/music";
 import { BAND_FRAMES, BandVideo } from "./band/BandVideo";
+import { PAINT_FRAMES, PaintTest } from "./paint/PaintTest";
 
 export const FPS = 30;
 const HD = { fps: FPS, width: 1920, height: 1080 };
@@ -17,6 +18,7 @@ export const Root: React.FC = () => (
     <Composition id="Test2c" component={Test2c} durationInFrames={TEST2C_FRAMES} {...HD} />
     <Composition id="Test3" component={Test3} durationInFrames={SONG_FRAMES} {...HD} />
     <Composition id="Band" component={BandVideo} durationInFrames={BAND_FRAMES} {...HD} />
+    <Composition id="PaintTest" component={PaintTest} durationInFrames={PAINT_FRAMES} {...HD} />
     <Composition id="SidePreview" component={SidePreview} durationInFrames={1} fps={FPS} width={1200} height={1600} />
   </>
 );

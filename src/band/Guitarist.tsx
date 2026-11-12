@@ -51,11 +51,11 @@ export const Guitarist: React.FC<{ t: number }> = ({ t }) => {
   const beatPhase = (t % SPB) / SPB;
   const beatNo = Math.floor(t / SPB) % 4;
   const hard = sec === "chorus";
-  const bounce = (hard ? 12 : 6) * Math.pow(Math.sin(Math.PI * beatPhase), 2);
+  const bounce = (hard ? 12 : 6) * Math.pow(Math.cos(Math.PI * beatPhase), 2);
   const hip: V = [1332, 784 + bounce];
-  const torsoDeg = -3 + Math.sin((t / (SPB * 8)) * Math.PI * 2) * 2 + (hard ? 4 * Math.pow(Math.sin(Math.PI * beatPhase), 2) : 0);
+  const torsoDeg = -3 + Math.sin((t / (SPB * 8)) * Math.PI * 2) * 2 + (hard ? 4 * Math.pow(Math.cos(Math.PI * beatPhase), 2) : 0);
   const neck = local(hip, torsoDeg, [0, -200]);
-  const bang = hard ? 13 * Math.pow(Math.sin(Math.PI * beatPhase), 3) : beatNo % 2 === 0 ? 5 * Math.pow(Math.sin(Math.PI * beatPhase), 3) : 0;
+  const bang = hard ? 13 * Math.pow(Math.cos(Math.PI * beatPhase), 4) : beatNo % 2 === 0 ? 5 * Math.pow(Math.cos(Math.PI * beatPhase), 4) : 0;
   const headDeg = torsoDeg + bang * 0.4 + ring(t, beatTimes, 0.2, 2.4, 2);
   const headDrop = bang * 1.2;
   const head = local(neck, headDeg, [0, -74 + headDrop]);
