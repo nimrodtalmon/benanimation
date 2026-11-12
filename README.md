@@ -2,6 +2,12 @@
 
 Animated clips from Ben's hand-drawn characters. Everything is code: scans in, MP4 out.
 
+## Band video (current direction)
+
+`music/score.py` writes a short pop-rock song as a score and renders it with FluidSynth;
+the same score drives the band in `src/band/` (singer, guitarist, drummer, stage, cameras).
+`npx remotion render Band out/band.mp4`. Design notes: `docs/DESIGN.md`; what to draw: `docs/BEN_DRAWING_KIT.md`.
+
 ## Pipeline
 
 1. **Scan** a drawing into `drawings/` (closed black outlines, plain white paper).
