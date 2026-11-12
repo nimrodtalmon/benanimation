@@ -1,5 +1,5 @@
 import { SONG, SPB, beatTimes, ring, sectionAt } from "./song";
-import { At, FloorShadow, Hand, INK, Mouth, MouthShape, Seg, V, add, aim, ik, ink, lerp, local } from "./rig";
+import { At, FloorShadow, Hand, INK, Mouth, MouthShape, Seg, V, add, aim, ik, ikArm, ink, lerp, local } from "./rig";
 
 /**
  * The singer — based on Ben's "Distor": messy brown hair, heavy-lidded eyes with
@@ -29,7 +29,7 @@ const voice = (t: number) => {
     const a = Math.min(1, (t - (n.t - 0.04)) / 0.07);
     const r = Math.min(1, (n.t + n.dur + 0.06 - t) / 0.08);
     const vib = n.dur > 0.6 ? 0.08 * Math.sin((t - n.t) * 2 * Math.PI * 5.5) : 0;
-    open = Math.max(0, Math.min(a, r) * (0.85 + vib));
+    open = Math.max(0, Math.min(a, r) * (0.85 + vib) * ((n as { open?: number }).open ?? 1));
     shape = n.vowel as MouthShape;
     pitch = n.pitch;
     long = n.dur >= 0.9 ? Math.min(1, (t - n.t) / 0.25) * r : 0;
@@ -41,7 +41,7 @@ const voice = (t: number) => {
 const reach = (t: number) => {
   let v = 0;
   for (const n of SONG.vocal) {
-    if (n.dur < 0.9 || sectionAt(n.t) !== "chorus") continue;
+    if (n.dur < 0.45 || sectionAt(n.t) !== "chorus") continue;
     const up = Math.min(1, Math.max(0, (t - n.t + 0.15) / 0.35));
     const down = Math.min(1, Math.max(0, (n.t + n.dur + 0.5 - t) / 0.4));
     v = Math.max(v, Math.min(up, down));
@@ -82,11 +82,11 @@ export const Singer: React.FC<{ t: number }> = ({ t }) => {
   const shL = local(neck, torsoDeg, [-74, 22]);
   const shR = local(neck, torsoDeg, [74, 22]);
   const standGrip: V = [MIC[0] + 14, MIC[1] + 150];
-  const armL = ik(shL, standGrip, 105, 98, 1);
+  const armL = ikArm(shL, standGrip, 105, 98, -1);
   const r = reach(t);
   const restHand: V = local(hip, torsoDeg, [92, 20]);
   const upHand: V = [shR[0] + 120, shR[1] - 40 + ring(t, beatTimes, 0.2, 2, 6)];
-  const armR = ik(shR, lerp(restHand, upHand, r), 105, 98, r > 0.35 ? 1 : -1);
+  const armR = ikArm(shR, lerp(restHand, upHand, r), 105, 98, 1);
 
   const blink = Math.max(lastBlink(t), v.long * 0.85);
   const hair = ring(t, beatTimes, 0.22, 2.4, 3);

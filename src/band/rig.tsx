@@ -31,6 +31,18 @@ export const ik = (root: V, target: V, l1: number, l2: number, bend: 1 | -1): { 
   return { mid: [root[0] + l1 * Math.cos(ang), root[1] + l1 * Math.sin(ang)], end };
 };
 
+/**
+ * IK for arms: of the two possible elbows, take the one that hangs lower and
+ * further out to the arm's side (side = -1 screen-left arm, +1 screen-right arm),
+ * so elbows never flip up or into the body.
+ */
+export const ikArm = (root: V, target: V, l1: number, l2: number, side: -1 | 1) => {
+  const a = ik(root, target, l1, l2, 1);
+  const b = ik(root, target, l1, l2, -1);
+  const score = (m: V) => (m[1] - root[1]) + 0.6 * side * (m[0] - root[0]);
+  return score(a.mid) >= score(b.mid) ? a : b;
+};
+
 export const INK = "#16120f";
 export const ink = { stroke: INK, strokeWidth: 5, strokeLinejoin: "round" as const, strokeLinecap: "round" as const };
 

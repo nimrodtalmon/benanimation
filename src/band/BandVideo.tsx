@@ -111,6 +111,11 @@ export const BandVideo: React.FC = () => {
           <rect width={1920} height={1080} fill="#fff" opacity={flash * 0.18} />
         </svg>
       </AbsoluteFill>
+      {"credit" in SONG && (
+        <AbsoluteFill style={{ justifyContent: "flex-end", alignItems: "center", paddingBottom: 40, opacity: interpolate(t, [SONG.duration - 4, SONG.duration - 3], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }) }}>
+          <div style={{ color: "#e9e1cf", fontFamily: "sans-serif", fontSize: 26, textShadow: "0 2px 6px #000" }}>{(SONG as unknown as { credit: string }).credit}</div>
+        </AbsoluteFill>
+      )}
       <Vignette strength={0.5} />
       <Grain opacity={0.12} />
     </AbsoluteFill>

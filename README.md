@@ -6,7 +6,8 @@ Animated clips from Ben's hand-drawn characters. Everything is code: scans in, M
 
 `music/score.py` writes a short pop-rock song as a score and renders it with FluidSynth;
 the same score drives the band in `src/band/` (singer, guitarist, drummer, stage, cameras).
-`npx remotion render Band out/band.mp4`. Design notes: `docs/DESIGN.md`; what to draw: `docs/BEN_DRAWING_KIT.md`.
+`npx remotion render Band out/band.mp4`.
+Current test song: `music/song2.py` — an excerpt of "silence in the air" by JeffSpeed68 (Stefan Kartenberg), ccMixter, CC BY-NC 3.0 (https://ccmixter.org/files/JeffSpeed68/53352), plus our drums; mouth shapes from Rhubarb Lip Sync on the vocal stem. Design notes: `docs/DESIGN.md`; what to draw: `docs/BEN_DRAWING_KIT.md`.
 
 ## Pipeline
 

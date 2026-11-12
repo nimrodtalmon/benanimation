@@ -1,5 +1,5 @@
 import { SONG, SPB, around, beatTimes, ring, sectionAt } from "./song";
-import { At, FloorShadow, Hand, INK, Seg, V, add, aim, ik, ink, local } from "./rig";
+import { At, FloorShadow, Hand, INK, Seg, V, add, aim, ik, ikArm, ink, local } from "./rig";
 
 /**
  * The guitarist — based on Ben's hat character: orange hair, white spiked hat with
@@ -73,9 +73,9 @@ export const Guitarist: React.FC<{ t: number }> = ({ t }) => {
   const shL = local(neck, torsoDeg, [-72, 24]); // strumming arm (screen-left)
   const shR = local(neck, torsoDeg, [72, 24]); // fretting arm (screen-right)
   const strum = G([-6, strumY(t)]);
-  const armL = ik(shL, add(strum, [-10, -14]), 104, 100, 1);
+  const armL = ikArm(shL, add(strum, [-10, -14]), 104, 100, -1);
   const fret = G([fretX(t), 26]);
-  const armR = ik(shR, fret, 104, 104, 1);
+  const armR = ikArm(shR, fret, 104, 104, 1);
   const hair = ring(t, beatTimes, 0.2, 2.6, hard ? 6 : 3);
 
   return (

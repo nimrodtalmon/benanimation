@@ -1,6 +1,6 @@
 import { staticFile } from "remotion";
 import { DRUM, SONG, SPB, decay, ring } from "./song";
-import { At, FloorShadow, Hand, INK, Seg, V, add, aim, ik, ink, len, local, mul, sub } from "./rig";
+import { At, FloorShadow, Hand, INK, Seg, V, add, aim, ikArm, ink, len, local, mul, sub } from "./rig";
 
 /**
  * The drummer behind the kit. Each stick follows the drum hits in the score:
@@ -119,8 +119,8 @@ export const Drummer: React.FC<{ t: number }> = ({ t }) => {
   const shR = local(neck, torsoDeg, [96, 30]);
   const L = stick(HANDS.L, t, shL);
   const R = stick(HANDS.R, t, shR);
-  const armL = ik(shL, L.hand, 100, 96, 1);
-  const armR = ik(shR, R.hand, 100, 96, -1);
+  const armL = ikArm(shL, L.hand, 100, 96, -1);
+  const armR = ikArm(shR, R.hand, 100, 96, 1);
 
   const hatOpen = SONG.drums.some((d) => d.piece === DRUM.OPEN_HAT && t >= d.t && t < d.t + 0.2);
 
