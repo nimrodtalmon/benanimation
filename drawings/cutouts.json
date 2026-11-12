@@ -1,0 +1,13 @@
+{
+  "hat-profile": {
+    "scan": "drawings/hat-profile.png",
+    "crop": "92,112,1543,2135",
+    "edge_walls": "left,bottom",
+    "gap": 14,
+    "dark": 165,
+    "anchors": {
+      "tear_end": [807, 1085],
+      "eye": [620, 720]
+    }
+  }
+}
