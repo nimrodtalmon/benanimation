@@ -40,12 +40,13 @@ def main():
         import json
         for name, c in json.load(open("drawings/cutouts.json")).items():
             cut(c["scan"], f"public/chars/{name}.png", c["crop"], c.get("seed", []),
-                c.get("gap", 6), c.get("dark", 110), c.get("all_pieces", False), c.get("edge_walls", ""))
+                c.get("gap", 6), c.get("dark", 110), c.get("all_pieces", False), c.get("edge_walls", ""),
+                c.get("paper_min", 200))
     else:
         cut(a.scan, a.out, a.crop, a.seed, a.gap, a.dark, a.all_pieces, a.edge_walls)
 
 
-def cut(scan, out_path, crop, seed, gap, dark, all_pieces, edge_walls):
+def cut(scan, out_path, crop, seed, gap, dark, all_pieces, edge_walls, paper_min=200):
     x0, y0, x1, y1 = map(int, crop.split(","))
     img = Image.open(scan).convert("RGB").crop((x0, y0, x1, y1))
     rgb = np.asarray(img).astype(np.int16)
@@ -60,7 +61,7 @@ def cut(scan, out_path, crop, seed, gap, dark, all_pieces, edge_walls):
 
     # Paper = light, low-saturation pixels that are not walls.
     hi, lo = rgb.max(axis=2), rgb.min(axis=2)
-    paper = (hi > 200) & ((hi - lo) < 40) & ~walls
+    paper = (hi > paper_min) & ((hi - lo) < 40) & ~walls
 
     seeds = [tuple(map(int, s.split(","))) for s in seed] or [(w - 30, h // 2), (w - 30, 60)]
     labels, _ = ndi.label(paper)
@@ -69,6 +70,13 @@ def cut(scan, out_path, crop, seed, gap, dark, all_pieces, edge_walls):
     # Give back the pixels eaten by the wall thickening.
     bg = ndi.binary_dilation(bg, iterations=gap - 1) & ~ink
 
+    # Edge-wall pixels take the state of the first column/row past the wall.
+    k = gap + 2
+    for edge in filter(None, edge_walls.split(",")):
+        if edge == "left": bg[:, :k] = bg[:, k:k + 1]
+        if edge == "right": bg[:, -k:] = bg[:, -k - 1:-k]
+        if edge == "top": bg[:k, :] = bg[k:k + 1, :]
+        if edge == "bottom": bg[-k:, :] = bg[-k - 1:-k, :]
     fg = ~bg
     if not all_pieces:
         lab, n = ndi.label(fg)

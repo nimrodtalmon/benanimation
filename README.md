@@ -13,7 +13,7 @@ Animated clips from Ben's hand-drawn characters. Everything is code: scans in, M
 4. **Preview / render**:
    - `npm install` (once)
    - `npm run studio` — live preview in the browser
-   - `npx remotion render Test1 out/test1.mp4`
+   - `npx remotion render Test2c out/test2c.mp4` (also Test1, Test2a, Test2b)
 
 ## Layout
 
@@ -21,7 +21,10 @@ Animated clips from Ben's hand-drawn characters. Everything is code: scans in, M
 drawings/         scans + cutouts.json (crop, outline settings, anchor points)
 scripts/cutout.py scan -> transparent PNG
 public/chars/     cut-out characters
-src/lib/          Character, Tear, effects (Boil, Grain, Vignette)
+scripts/split_front.py  front drawing -> head / body layers + eye mask (puppet)
+public/tex/       texture patches cut from Ben's drawings (skin, hair, jacket)
+src/chars/        DistorFront (puppet from Ben's drawing), DistorSide (drawn in code)
+src/lib/          Character, Tear, Balloon, Look, anim (blink/talk/sway), effects
 src/backgrounds/  GreyCity (drawn in code)
 src/shots/        one file per shot
 ```
