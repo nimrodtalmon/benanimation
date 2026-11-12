@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ben's band — drawing kit</title>
+<style>
+  :root { --ink:#1b1714; --paper:#f4efe6; --muted:#7d746a; --ok:#2f8a4a; --accent:#b3132e; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background:var(--paper); color:var(--ink); }
+  main { max-width: 640px; margin: 0 auto; padding: 18px 14px 110px; }
+  header { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+  h1 { font-size: 22px; margin: 0; }
+  .lang button { border:1px solid var(--ink); background:none; padding:4px 9px; font-size:14px; cursor:pointer; }
+  .lang button.on { background:var(--ink); color:var(--paper); }
+  .tips { margin: 12px 0; font-size: 14px; line-height: 1.45; color: var(--muted); }
+  .bar { height: 8px; background: #e2dacb; margin: 6px 0 4px; }
+  .bar div { height: 100%; background: var(--ok); width: 0; transition: width .3s; }
+  .count { font-size: 13px; color: var(--muted); }
+  .list { max-height: 62vh; overflow-y: auto; border-top: 2px solid var(--ink); border-bottom: 2px solid var(--ink); margin-top: 10px; }
+  .row { display:grid; grid-template-columns: 56px 1fr 64px; gap: 12px; align-items:center; padding: 10px 2px; border-bottom: 1px solid #ddd3c2; }
+  .row:last-child { border-bottom: none; }
+  .row svg { width:56px; height:56px; }
+  .t { font-weight: 600; font-size: 15px; }
+  .d { font-size: 13px; color: var(--muted); margin-top: 2px; }
+  .slot { width:64px; height:64px; border: 2px dashed #c7bca9; display:flex; align-items:center; justify-content:center; cursor:pointer; position:relative; overflow:hidden; background:#fff; }
+  .slot img { width:100%; height:100%; object-fit:cover; }
+  .slot span { font-size: 26px; color:#b6aa95; }
+  .slot.done { border: 2px solid var(--ok); }
+  .slot.busy::after { content:""; position:absolute; inset:0; background:rgba(255,255,255,.7); }
+  .slot input { display:none; }
+  footer { position: fixed; bottom: 0; left: 0; right: 0; background: var(--paper); border-top: 2px solid var(--ink); padding: 12px 14px; }
+  footer .in { max-width: 640px; margin: 0 auto; display:flex; gap:10px; align-items:center; justify-content:space-between; }
+  footer button { background: var(--ink); color: var(--paper); border: none; padding: 10px 14px; font-size: 15px; cursor: pointer; }
+  footer .msg { font-size: 13px; color: var(--muted); }
+  [dir=rtl] .row { direction: rtl; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1 id="title"></h1>
+    <div class="lang"><button data-l="en">EN</button><button data-l="he">עב</button></div>
+  </header>
+  <div class="tips" id="tips"></div>
+  <div class="bar"><div id="bar"></div></div>
+  <div class="count" id="count"></div>
+  <div class="list" id="list"></div>
+</main>
+<footer><div class="in"><span class="msg" id="msg"></span><button id="done"></button></div></footer>
+
+<script>
+const CHAR = "singer";
+const S = 'stroke="#1b1714" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"';
+const ICON = {
+  head: `<svg viewBox="0 0 56 56"><path ${S} d="M14 26 Q12 6 28 6 Q44 6 42 26 Q42 46 28 50 Q14 46 14 26Z"/><path ${S} d="M14 22 Q20 10 28 16 Q36 8 42 22"/><circle cx="22" cy="28" r="2.5" fill="#1b1714"/><circle cx="34" cy="28" r="2.5" fill="#1b1714"/><path ${S} d="M23 40 L33 40"/></svg>`,
+  "eyes-closed": `<svg viewBox="0 0 56 56"><path ${S} d="M8 28 Q16 34 24 28"/><path ${S} d="M32 28 Q40 34 48 28"/></svg>`,
+  "mouth-ah": `<svg viewBox="0 0 56 56"><ellipse ${S} cx="28" cy="28" rx="14" ry="12"/><path d="M18 22 L38 22" stroke="#1b1714" stroke-width="3"/></svg>`,
+  "mouth-oh": `<svg viewBox="0 0 56 56"><ellipse ${S} cx="28" cy="28" rx="8" ry="11"/></svg>`,
+  "mouth-ee": `<svg viewBox="0 0 56 56"><rect ${S} x="10" y="21" width="36" height="14" rx="7"/><path ${S} d="M16 28 L40 28"/></svg>`,
+  body: `<svg viewBox="0 0 56 56"><path ${S} d="M24 4 L24 12 L10 16 L12 52 L44 52 L46 16 L32 12 L32 4"/><path ${S} d="M28 14 L28 52"/></svg>`,
+  "upper-arm": `<svg viewBox="0 0 56 56"><rect ${S} x="20" y="4" width="16" height="48" rx="8"/><circle cx="28" cy="12" r="2" fill="#b3132e"/><circle cx="28" cy="44" r="2" fill="#b3132e"/></svg>`,
+  "forearm-open": `<svg viewBox="0 0 56 56"><rect ${S} x="21" y="2" width="14" height="34" rx="7"/><path ${S} d="M20 36 Q18 50 28 52 Q38 50 36 36 M22 46 L18 54 M28 50 L28 55 M34 46 L38 54"/></svg>`,
+  "forearm-grip": `<svg viewBox="0 0 56 56"><rect ${S} x="21" y="2" width="14" height="32" rx="7"/><path ${S} d="M19 34 Q16 46 28 47 Q40 46 37 34Z"/><circle ${S} cx="44" cy="40" r="6"/><path ${S} d="M28 44 L40 42"/></svg>`,
+  "upper-leg": `<svg viewBox="0 0 56 56"><rect ${S} x="18" y="2" width="20" height="52" rx="10"/></svg>`,
+  "lower-leg": `<svg viewBox="0 0 56 56"><rect ${S} x="21" y="2" width="15" height="40" rx="7"/><path ${S} d="M20 40 L20 50 L46 50 Q46 42 36 40"/></svg>`,
+};
+const PARTS = [
+  ["head", "Head", "Front view. Eyes open, mouth closed. Hair, ears and hat if any. No neck.", "ראש", "מלפנים. עיניים פתוחות, פה סגור. עם שיער ואוזניים (וכובע אם יש). בלי צוואר."],
+  ["eyes-closed", "Eyes closed", "Only the two eyes, closed, same size as on the head.", "עיניים עצומות", "רק שתי העיניים, עצומות, באותו גודל כמו בראש."],
+  ["mouth-ah", "Mouth: “Aaah”", "Wide open. Same size as the mouth on the head.", "פה: ״אההה״", "פתוח לרווחה. באותו גודל כמו הפה בראש."],
+  ["mouth-oh", "Mouth: “Ooh”", "Round and small.", "פה: ״אוּוּ״", "עגול וקטן."],
+  ["mouth-ee", "Mouth: “Eee”", "Wide, teeth showing.", "פה: ״איייי״", "רחב, עם שיניים."],
+  ["body", "Body", "Front view, neck to belt, with the clothes. No arms, no head.", "גוף", "מלפנים, מהצוואר עד החגורה, עם הבגדים. בלי ידיים ובלי ראש."],
+  ["upper-arm", "Upper arm", "Shoulder to elbow, in the sleeve. Round ends.", "זרוע עליונה", "מהכתף עד המרפק, עם השרוול. קצוות עגולים."],
+  ["forearm-open", "Forearm + open hand", "Elbow to fingers, hand open. Round end at the elbow.", "אמה + יד פתוחה", "מהמרפק עד האצבעות, יד פתוחה. קצה עגול במרפק."],
+  ["forearm-grip", "Forearm + hand on a mic", "Elbow to fingers, hand holding a microphone.", "אמה + יד שמחזיקה מיקרופון", "מהמרפק עד האצבעות, היד מחזיקה מיקרופון."],
+  ["upper-leg", "Upper leg", "Hip to knee, in the trousers. Round ends.", "ירך", "מהמותן עד הברך, עם המכנסיים. קצוות עגולים."],
+  ["lower-leg", "Lower leg + shoe", "Knee to shoe, shoe pointing sideways.", "שוק + נעל", "מהברך עד הנעל, הנעל פונה הצידה."],
+];
+const TXT = {
+  en: { title: "Ben's band · the singer", tips: "One part per page · white paper, closed black outlines, color as usual · all parts at the same size (the head about as big as your hand) · round ends where parts join, they overlap · photo from straight above, good light, the whole page in the picture.", count: (n, m) => `${n} of ${m} parts`, done: "Done → Claude", copied: "Copied. Paste it to Claude.", nokey: "This link is missing its key." },
+  he: { title: "הלהקה של בן · הזמר", tips: "חלק אחד בכל דף · דף לבן, קווי מתאר שחורים וסגורים, צביעה כרגיל · כל החלקים באותו גודל (הראש בערך בגודל כף היד) · קצוות עגולים איפה שחלקים מתחברים, הם חופפים · צילום מלמעלה, באור טוב, כל הדף בתמונה.", count: (n, m) => `${n} מתוך ${m} חלקים`, done: "סיימתי ← Claude", copied: "הועתק. להדביק ל-Claude.", nokey: "חסר מפתח בקישור." },
+};
+const key = new URLSearchParams(location.search).get("k") || "";
+let lang = localStorage.getItem("benlang") || "en";
+let state = {};
+
+function render() {
+  const T = TXT[lang];
+  document.documentElement.lang = lang;
+  document.body.dir = lang === "he" ? "rtl" : "ltr";
+  document.querySelectorAll(".lang button").forEach(b => b.classList.toggle("on", b.dataset.l === lang));
+  document.getElementById("title").textContent = T.title;
+  document.getElementById("tips").textContent = T.tips;
+  document.getElementById("done").textContent = T.done;
+  const have = state[CHAR] || {};
+  const n = PARTS.filter(p => have[p[0]]).length;
+  document.getElementById("count").textContent = T.count(n, PARTS.length);
+  document.getElementById("bar").style.width = (100 * n / PARTS.length) + "%";
+  document.getElementById("msg").textContent = key ? "" : T.nokey;
+  const list = document.getElementById("list");
+  list.innerHTML = "";
+  PARTS.forEach(([id, en, enD, he, heD], i) => {
+    const row = document.createElement("div");
+    row.className = "row";
+    const got = have[id];
+    row.innerHTML = `${ICON[id]}<div><div class="t">${i + 1}. ${lang === "he" ? he : en}</div><div class="d">${lang === "he" ? heD : enD}</div></div>
+      <label class="slot ${got ? "done" : ""}">${got ? `<img src="files/${CHAR}/${id}.jpg?k=${encodeURIComponent(key)}&t=${got.t}">` : "<span>📷</span>"}<input type="file" accept="image/*"></label>`;
+    row.querySelector("input").addEventListener("change", e => upload(id, e.target.files[0], row.querySelector(".slot")));
+    list.appendChild(row);
+  });
+}
+
+async function load() {
+  if (!key) return render();
+  const r = await fetch(`api/state?k=${encodeURIComponent(key)}`);
+  if (r.ok) state = await r.json();
+  render();
+}
+
+async function upload(part, file, slot) {
+  if (!file) return;
+  slot.classList.add("busy");
+  // shrink on the phone before sending (max 2400 px, JPEG)
+  const bmp = await createImageBitmap(file);
+  const s = Math.min(1, 2400 / Math.max(bmp.width, bmp.height));
+  const c = document.createElement("canvas");
+  c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s);
+  c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+  const blob = await new Promise(res => c.toBlob(res, "image/jpeg", 0.9));
+  const r = await fetch(`api/upload/${CHAR}/${part}?k=${encodeURIComponent(key)}`, { method: "POST", headers: { "Content-Type": "image/jpeg" }, body: blob });
+  slot.classList.remove("busy");
+  if (!r.ok) { alert("Upload failed: " + r.status); return; }
+  await load();
+}
+
+document.querySelectorAll(".lang button").forEach(b => b.addEventListener("click", () => { lang = b.dataset.l; localStorage.setItem("benlang", lang); render(); }));
+document.getElementById("done").addEventListener("click", async () => {
+  const text = `Ben uploaded drawings for the singer in the drawing kit: ${location.origin}${location.pathname}?k=${key} — please cut them out, put them into the singer puppet in the benanimation repo, and render a short test.`;
+  try { await navigator.clipboard.writeText(text); document.getElementById("msg").textContent = TXT[lang].copied; } catch (e) {}
+  window.open("https://claude.ai/new", "_blank");
+});
+load();
+</script>
+</body>
+</html>
