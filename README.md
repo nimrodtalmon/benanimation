@@ -2,7 +2,22 @@
 
 Animated clips from Ben's hand-drawn characters. Everything is code: scans in, MP4 out.
 
-## Band video (current direction)
+## Warp-puppet band (current direction)
+
+Everything in Python + OpenCV (`puppet/`), every move timed to the song (`src/song.json` + `public/song/vocals.wav`):
+
+- `puppet/warp.py`: one drawing + landmarks -> head turn, jaw/mouth, blinks, hair sway, tilt/nod (Live2D-style pixel warps).
+- `puppet/limb.py`: bending arms from Ben's two arm drawings (upper arm, forearm+hand) or one painted arm: 2-bone IK,
+  rigid parts, the outer elbow swept from the drawing's own cross-section, forearm cap as the crease, foreshortening.
+- `puppet/props.py`: mic, drum kit (Ben's skull on the kick), guitar, sticks, strap, drawn in code in a marker style.
+- `puppet/band.py`: Singer (Ben's Distor + code stand-in arms), Drummer (David Revoy's Pepper model sheet, CC BY 4.0),
+  Guitarist (Revoy's Coriander concept art, CC BY 4.0), stage, crowd, shot list.
+  - `python3 puppet/band.py singer|drummer|guitarist [start dur]` -> `out/band-<who>.mp4`
+  - `python3 puppet/band.py video` -> `out/band-video.mp4` (44 s, cuts on the bar; renders two halves in parallel, ~10 min)
+- `puppet/standins.py`: Distor's stand-in arms and the jacket continued past the paper edge -> `public/parts/distor/`.
+- `puppet/cutout_paint.py`: cut-outs of the Revoy paintings (sources in `drawings/revoy/`) and Pepper's arms -> `public/parts/pepper/`.
+
+## Band video (older Remotion version, superseded)
 
 `music/score.py` writes a short pop-rock song as a score and renders it with FluidSynth;
 the same score drives the band in `src/band/` (singer, guitarist, drummer, stage, cameras).

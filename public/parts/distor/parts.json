@@ -1,0 +1,41 @@
+{
+ "credit": "Drawing: Ben (arms and jacket sides: code stand-ins)",
+ "pad": 260,
+ "upper_arm": {
+  "file": "upper_arm.png",
+  "shoulder": [
+   165,
+   165
+  ],
+  "elbow": [
+   165,
+   765
+  ]
+ },
+ "forearm": {
+  "file": "forearm.png",
+  "elbow": [
+   165,
+   125
+  ],
+  "wrist": [
+   165,
+   595
+  ],
+  "grip": [
+   165,
+   690
+  ]
+ },
+ "shoulders": {
+  "left": [
+   175,
+   1455
+  ],
+  "right": [
+   1500,
+   1430
+  ]
+ },
+ "arm_width": 230
+}

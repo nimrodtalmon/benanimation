@@ -1,0 +1,313 @@
+"""Props drawn in code in a marker style (black ink outline, flat tones, a highlight):
+microphone, electric guitar, drum kit. Each returns a BGRA float image plus anchor points,
+drawn at a fixed size; callers scale and rotate them.
+"""
+import math
+
+import cv2
+import numpy as np
+
+INK = (0.075, 0.07, 0.08)
+
+
+def _canvas(w, h):
+    return np.zeros((h, w, 4), np.float32)
+
+
+def _poly(img, pts, color, ink=7, ss=4):
+    """Antialiased filled polygon with an ink outline (supersampled masks)."""
+    h, w = img.shape[:2]
+    P = np.round(np.asarray(pts, np.float64) * ss * 8).astype(np.int32)
+    m = np.zeros((h * ss, w * ss), np.uint8)
+    cv2.fillPoly(m, [P], 255, cv2.LINE_AA, shift=3)
+    m = cv2.resize(m, (w, h), interpolation=cv2.INTER_AREA).astype(np.float32)[..., None] / 255
+    col = np.asarray(color, np.float32)
+    if col.ndim == 1:
+        col = col[None, None, :]
+    img[..., :3] = img[..., :3] * (1 - m) + col * m
+    img[..., 3:4] = np.maximum(img[..., 3:4], m)
+    if ink:
+        _line(img, pts, ink, closed=True)
+    return m[..., 0]
+
+
+def _line(img, pts, width, closed=False, color=INK, ss=4):
+    h, w = img.shape[:2]
+    P = np.round(np.asarray(pts, np.float64) * ss * 8).astype(np.int32)
+    m = np.zeros((h * ss, w * ss), np.uint8)
+    cv2.polylines(m, [P], closed, 255, max(1, int(width * ss)), cv2.LINE_AA, shift=3)
+    m = cv2.resize(m, (w, h), interpolation=cv2.INTER_AREA).astype(np.float32)[..., None] / 255
+    img[..., :3] = img[..., :3] * (1 - m) + np.asarray(color, np.float32) * m
+    img[..., 3:4] = np.maximum(img[..., 3:4], m)
+
+
+def _ellipse_pts(cx, cy, rx, ry, a0=0, a1=2 * math.pi, n=80, rot=0.0):
+    t = np.linspace(a0, a1, n)
+    x, y = rx * np.cos(t), ry * np.sin(t)
+    c, s = math.cos(rot), math.sin(rot)
+    return np.stack([cx + c * x - s * y, cy + s * x + c * y], 1)
+
+
+def _gradient(h, w, c0, c1, axis=1, p=1.0):
+    t = np.linspace(0, 1, w if axis == 1 else h, dtype=np.float32) ** p
+    g = np.asarray(c0, np.float32) * (1 - t[:, None]) + np.asarray(c1, np.float32) * t[:, None]
+    return np.broadcast_to(g[None] if axis == 1 else g[:, None], (h, w, 3)).copy()
+
+
+def microphone(L=330):
+    """Vertical handheld mic, grille on top. Returns (rgba, anchors: grip, head)."""
+    w, h = 140, L + 40
+    img = _canvas(w, h)
+    cx = w / 2
+    head_r = 50
+    hy = 20 + head_r
+    # handle: tapered, dark, with a highlight stripe
+    top_w, bot_w = 30, 19
+    y0, y1 = hy + head_r + 22, h - 14
+    handle = [(cx - top_w, y0), (cx + top_w, y0), (cx + bot_w, y1), (cx - bot_w, y1)]
+    _poly(img, handle, _gradient(h, w, (0.10, 0.10, 0.11), (0.30, 0.30, 0.33), p=0.8), ink=6)
+    _line(img, [(cx + 10, y0 + 12), (cx + 6, y1 - 12)], 5, color=(0.55, 0.55, 0.58))
+    # collar between handle and grille
+    _poly(img, [(cx - 40, hy + head_r - 6), (cx + 40, hy + head_r - 6), (cx + 33, y0 + 4), (cx - 33, y0 + 4)],
+          _gradient(h, w, (0.55, 0.55, 0.58), (0.85, 0.85, 0.88)), ink=6)
+    # grille ball with a mesh and a highlight
+    m = _poly(img, _ellipse_pts(cx, hy, head_r, head_r), _gradient(h, w, (0.35, 0.36, 0.38), (0.75, 0.76, 0.78), p=0.7), ink=0)
+    mesh = np.zeros((h, w), np.float32)
+    for k in range(-head_r, head_r, 11):
+        cv2.line(mesh, (int(cx + k - 60), int(hy - 60)), (int(cx + k + 60), int(hy + 60)), 1.0, 2, cv2.LINE_AA)
+        cv2.line(mesh, (int(cx + k + 60), int(hy - 60)), (int(cx + k - 60), int(hy + 60)), 1.0, 2, cv2.LINE_AA)
+    mesh *= m * 0.45
+    img[..., :3] *= (1 - mesh[..., None])
+    hl = np.zeros((h, w), np.float32)
+    cv2.ellipse(hl, (int(cx + 16), int(hy - 18)), (14, 9), -30, 0, 360, 1.0, -1, cv2.LINE_AA)
+    hl = cv2.GaussianBlur(hl, (0, 0), 3) * m
+    img[..., :3] = img[..., :3] * (1 - 0.8 * hl[..., None]) + 0.8 * hl[..., None]
+    _line(img, _ellipse_pts(cx, hy, head_r, head_r), 6, closed=True)
+    _line(img, [(cx - head_r + 6, hy + 4), (cx + head_r - 6, hy + 4)], 4)  # seam across the grille
+    return img, dict(grip=(cx, (y0 + y1) / 2 - 15), head=(cx, hy))
+
+
+def place(prop, anchor, world, angle, scale):
+    """Affine that puts prop's anchor at world, rotated by angle (radians, 0 = as drawn)."""
+    c, s = math.cos(angle) * scale, math.sin(angle) * scale
+    R = np.array([[c, -s], [s, c]])
+    t = np.asarray(world, float) - R @ np.asarray(anchor, float)
+    return np.hstack([R, t[:, None]])
+
+
+def blit(dst, prop, M):
+    """Warp a BGRA prop with affine M and composite it over dst (BGR float), in place."""
+    h, w = prop.shape[:2]
+    corners = np.array([[0, 0, 1], [w, 0, 1], [0, h, 1], [w, h, 1]], float) @ M.T
+    x0, y0 = np.floor(corners.min(0)).astype(int) - 1
+    x1, y1 = np.ceil(corners.max(0)).astype(int) + 1
+    x0, y0 = max(x0, 0), max(y0, 0)
+    x1, y1 = min(x1, dst.shape[1]), min(y1, dst.shape[0])
+    if x1 <= x0 or y1 <= y0:
+        return
+    M2 = M.copy()
+    M2[:, 2] -= [x0, y0]
+    lay = cv2.warpAffine(prop, M2, (x1 - x0, y1 - y0), flags=cv2.INTER_LINEAR, borderValue=0)
+    a = lay[..., 3:4]
+    dst[y0:y1, x0:x1] = dst[y0:y1, x0:x1] * (1 - a) + lay[..., :3] * a
+
+
+# ---------------------------------------------------------------- drum kit
+RED_SHELL = ((0.10, 0.06, 0.32), (0.25, 0.18, 0.68))  # BGR dark, light: deep red lacquer
+CHROME = ((0.38, 0.38, 0.40), (0.92, 0.92, 0.94))
+HEAD = (0.86, 0.90, 0.92)
+BRASS = ((0.10, 0.38, 0.55), (0.45, 0.80, 0.95))
+
+
+def _shell_tone(h, w, dark, light):
+    """Cylinder shading across x: dark at the sides, light stripe left of center."""
+    x = np.linspace(-1, 1, w, dtype=np.float32)
+    k = np.clip(1 - np.abs(x + 0.25) ** 1.4, 0, 1)
+    col = np.asarray(dark, np.float32) * (1 - k[:, None]) + np.asarray(light, np.float32) * k[:, None]
+    return np.broadcast_to(col[None], (h, w, 3)).copy()
+
+
+def drum(rx, depth, shell=RED_SHELL, ink=5, lugs=6, tilt=0.30):
+    """A drum seen from the front and a little above. Anchor 'head' = center of the top head."""
+    ry = rx * tilt
+    pad = ink + 4
+    w, h = int(2 * rx + 2 * pad), int(2 * ry + depth + 2 * pad)
+    img = _canvas(w, h)
+    cx, cy = w / 2, pad + ry
+    body = np.concatenate([_ellipse_pts(cx, cy, rx, ry, math.pi, 2 * math.pi, 40),
+                           _ellipse_pts(cx, cy + depth, rx, ry, 0, math.pi, 40)])
+    _poly(img, body, _shell_tone(h, w, *shell), ink=0)
+    # lugs and a hoop line at the bottom
+    for i in range(lugs):
+        a = math.pi * (0.12 + 0.76 * (i + 0.5) / lugs)
+        x = cx - rx * math.cos(a)
+        yb = cy + ry * math.sin(a) * 0.9
+        _poly(img, [(x - 4, yb + depth * 0.25), (x + 4, yb + depth * 0.25), (x + 4, yb + depth * 0.7), (x - 4, yb + depth * 0.7)],
+              (0.80, 0.80, 0.84), ink=2)
+    _line(img, _ellipse_pts(cx, cy + depth - 6, rx, ry, 0, math.pi, 40), 6, color=CHROME[1])
+    _line(img, _ellipse_pts(cx, cy + depth - 6, rx, ry, 0, math.pi, 40), 2, color=INK)
+    # top head + chrome hoop
+    _poly(img, _ellipse_pts(cx, cy, rx, ry), _gradient(h, w, HEAD, (0.70, 0.74, 0.78), axis=0), ink=0)
+    _line(img, _ellipse_pts(cx, cy, rx - 3, ry - 2), 7, closed=True, color=CHROME[1])
+    _line(img, body, ink, closed=True)
+    _line(img, _ellipse_pts(cx, cy, rx, ry), ink - 1, closed=True)
+    return img, dict(head=(cx, cy), top=(cx, cy))
+
+
+def kick_front(r, skull=None, ink=6):
+    """Bass drum seen from the front: shell ring, black resonant head, Ben's skull on it."""
+    pad = ink + 4
+    w = h = int(2 * r + 2 * pad)
+    img = _canvas(w, h)
+    c = w / 2
+    _poly(img, _ellipse_pts(c, c, r, r, n=160), _shell_tone(h, w, *RED_SHELL), ink=0)
+    _poly(img, _ellipse_pts(c, c, r * 0.90, r * 0.90, n=160), (0.11, 0.10, 0.12), ink=0)
+    _line(img, _ellipse_pts(c, c, r * 0.905, r * 0.905, n=160), 8, closed=True, color=CHROME[1])
+    if skull is not None:
+        sk = skull.copy()
+        a = cv2.erode(sk[..., 3], np.ones((5, 5), np.uint8))
+        sk = sk.astype(np.float32) / 255
+        sk[..., 3] = cv2.GaussianBlur(a.astype(np.float32) / 255, (0, 0), 1.2)
+        s = (r * 1.15) / sk.shape[0]
+        sk = cv2.resize(sk, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
+        sh, sw = sk.shape[:2]
+        y0, x0 = int(c - sh / 2), int(c - sw / 2)
+        aa = sk[..., 3:4]
+        img[y0:y0 + sh, x0:x0 + sw, :3] = img[y0:y0 + sh, x0:x0 + sw, :3] * (1 - aa) + sk[..., :3] * aa
+    for i in range(10):  # tension rods on the hoop
+        a = 2 * math.pi * i / 10 + 0.3
+        x, y = c + r * 0.95 * math.cos(a), c + r * 0.95 * math.sin(a)
+        _poly(img, _ellipse_pts(x, y, 7, 7, n=16), (0.85, 0.85, 0.88), ink=2)
+    _line(img, _ellipse_pts(c, c, r, r, n=160), ink, closed=True)
+    return img, dict(center=(c, c))
+
+
+def cymbal(rx, tilt=0.22, ink=4):
+    ry = rx * tilt
+    pad = ink + 4
+    w, h = int(2 * rx + 2 * pad), int(2 * ry + 2 * pad + rx * 0.12)
+    img = _canvas(w, h)
+    cx, cy = w / 2, h / 2
+    out = np.concatenate([_ellipse_pts(cx, cy, rx, ry, 0, math.pi, 50), _ellipse_pts(cx, cy - rx * 0.03, rx, ry * 0.85, math.pi, 2 * math.pi, 50)])
+    _poly(img, out, _gradient(h, w, BRASS[0], BRASS[1], p=0.6) * 0.5 + _shell_tone(h, w, *BRASS) * 0.5, ink=0)
+    for k in (0.35, 0.55, 0.75):  # lathe rings
+        _line(img, _ellipse_pts(cx, cy, rx * k, ry * k), 1.5, closed=True, color=BRASS[0])
+    _poly(img, _ellipse_pts(cx, cy - ry * 0.25, rx * 0.16, ry * 0.42), BRASS[1], ink=2)  # bell
+    hl = np.zeros((h, w), np.float32)
+    cv2.ellipse(hl, (int(cx - rx * 0.35), int(cy - ry * 0.1)), (int(rx * 0.22), max(2, int(ry * 0.18))), 0, 0, 360, 1.0, -1, cv2.LINE_AA)
+    hl = cv2.GaussianBlur(hl, (0, 0), 4)
+    img[..., :3] = img[..., :3] * (1 - 0.6 * hl[..., None]) + 0.6 * hl[..., None]
+    _line(img, out, ink, closed=True)
+    return img, dict(center=(cx, cy))
+
+
+def stick(L=230, ink=3):
+    w, h = 28, int(L + 16)
+    img = _canvas(w, h)
+    cx = w / 2
+    body = [(cx - 6, h - 8), (cx + 6, h - 8), (cx + 3.5, 18), (cx - 3.5, 18)]
+    _poly(img, body, _shell_tone(h, w, (0.30, 0.55, 0.72), (0.62, 0.85, 0.96)), ink=ink)
+    _poly(img, _ellipse_pts(cx, 13, 5.5, 8, n=24), (0.62, 0.85, 0.96), ink=ink)
+    # anchors: tip at the top, grip near the butt end
+    return img, dict(tip=(cx, 12), grip=(cx, h - 8 - 0.18 * L))
+
+
+def pole(dst, p0, p1, width=7):
+    """A stand pole: dark metal with a highlight, drawn straight into the frame."""
+    p0, p1 = tuple(int(v) for v in p0), tuple(int(v) for v in p1)
+    cv2.line(dst, p0, p1, INK, width + 4, cv2.LINE_AA)
+    cv2.line(dst, p0, p1, (0.35, 0.35, 0.38), width, cv2.LINE_AA)
+    cv2.line(dst, (p0[0] - 1, p0[1]), (p1[0] - 1, p1[1]), (0.75, 0.75, 0.78), max(1, width // 3), cv2.LINE_AA)
+
+
+# ---------------------------------------------------------------- electric guitar
+def _chaikin(pts, n=3):
+    P = np.asarray(pts, float)
+    for _ in range(n):
+        Q = []
+        for i in range(len(P)):
+            a, b = P[i], P[(i + 1) % len(P)]
+            Q += [0.75 * a + 0.25 * b, 0.25 * a + 0.75 * b]
+        P = np.array(Q)
+    return P
+
+
+def guitar(Lb, ink=5):
+    """Single-cutaway electric guitar, neck pointing right (+x), strings drawn per frame.
+    Lb = body length in px. Anchors: strum (over the pickups), bridge, nut, and the string
+    spacing, so callers can draw ringing strings."""
+    neck_len, neck_w, head_len = 1.55 * Lb, 0.13 * Lb, 0.36 * Lb
+    pad = ink + 6
+    w = int(Lb + neck_len + head_len + 2 * pad)
+    h = int(0.9 * Lb + 2 * pad)
+    img = _canvas(w, h)
+    ox, oy = pad, h / 2
+    B = lambda pts: [(ox + x * Lb, oy + y * Lb) for x, y in pts]  # noqa: E731
+    body = _chaikin(B([(0, 0), (0.03, -0.26), (0.15, -0.41), (0.31, -0.44), (0.48, -0.39), (0.61, -0.31), (0.72, -0.32),
+                       (0.84, -0.34), (0.95, -0.27), (1.0, -0.12), (1.02, -0.06), (1.02, 0.06), (0.97, 0.09), (0.92, 0.10),
+                       (0.87, 0.17), (0.86, 0.25), (0.81, 0.30), (0.72, 0.31), (0.61, 0.31), (0.48, 0.39), (0.31, 0.44),
+                       (0.15, 0.41), (0.03, 0.26)]), 3)
+    # sunburst: dark teal edge to a warm amber center
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    rr = np.sqrt(((xx - ox - 0.42 * Lb) / (0.62 * Lb)) ** 2 + ((yy - oy) / (0.42 * Lb)) ** 2)
+    k = np.clip((rr - 0.25) / 0.75, 0, 1)[..., None] ** 1.3
+    burst = np.array([0.25, 0.55, 0.85], np.float32) * (1 - k) + np.array([0.22, 0.20, 0.10], np.float32) * k
+    _poly(img, body, burst, ink=0)
+    # neck and headstock
+    nx0, nx1 = ox + 0.92 * Lb, ox + Lb + neck_len
+    _poly(img, [(nx0, oy - neck_w / 2), (nx1, oy - neck_w * 0.45), (nx1, oy + neck_w * 0.45), (nx0, oy + neck_w / 2)],
+          _gradient(h, w, (0.35, 0.55, 0.75), (0.22, 0.38, 0.55), axis=0), ink=ink - 1)
+    fb0 = ox + 1.0 * Lb
+    for i in range(1, 19):  # frets get closer toward the body
+        x = nx1 - neck_len * (1 - 2 ** (-i / 12)) * 1.45
+        if x > fb0:
+            _line(img, [(x, oy - neck_w * 0.46), (x, oy + neck_w * 0.46)], 2, color=(0.75, 0.78, 0.80))
+    for i in (3, 5, 7, 9, 12, 15):
+        x = nx1 - neck_len * (1 - 2 ** (-(i - 0.5) / 12)) * 1.45
+        if x > fb0:
+            _poly(img, _ellipse_pts(x, oy, 3.5, 3.5, n=12), (0.92, 0.92, 0.90), ink=0)
+    head = [(nx1 - 2, oy - neck_w * 0.5), (nx1 + head_len * 0.9, oy - neck_w * 0.95), (nx1 + head_len, oy - neck_w * 0.7),
+            (nx1 + head_len, oy + neck_w * 0.6), (nx1 + head_len * 0.85, oy + neck_w * 0.75), (nx1 - 2, oy + neck_w * 0.5)]
+    _poly(img, head, (0.10, 0.10, 0.12), ink=ink - 1)
+    for i in range(3):
+        x = nx1 + head_len * (0.25 + 0.25 * i)
+        for sgn in (-1, 1):
+            _poly(img, _ellipse_pts(x, oy + sgn * neck_w * 0.95, 6, 5, n=14), (0.85, 0.85, 0.88), ink=2)
+    # pickguard, pickups, bridge, knobs
+    guard = _chaikin(B([(0.45, 0.06), (0.62, 0.08), (0.82, 0.10), (0.84, 0.22), (0.70, 0.27), (0.52, 0.27), (0.42, 0.20)]), 2)
+    _poly(img, guard, (0.80, 0.90, 0.95), ink=2)
+    for x in (0.58, 0.80):
+        _poly(img, [(ox + (x - 0.05) * Lb, oy - 0.10 * Lb), (ox + (x + 0.05) * Lb, oy - 0.10 * Lb),
+                    (ox + (x + 0.05) * Lb, oy + 0.10 * Lb), (ox + (x - 0.05) * Lb, oy + 0.10 * Lb)], (0.12, 0.12, 0.13), ink=2)
+        for j in range(-2, 3):
+            _poly(img, _ellipse_pts(ox + x * Lb, oy + j * 0.035 * Lb, 2.5, 2.5, n=10), (0.75, 0.75, 0.78), ink=0)
+    bx = ox + 0.33 * Lb
+    _poly(img, [(bx - 0.03 * Lb, oy - 0.11 * Lb), (bx + 0.03 * Lb, oy - 0.11 * Lb), (bx + 0.03 * Lb, oy + 0.11 * Lb), (bx - 0.03 * Lb, oy + 0.11 * Lb)],
+          _gradient(h, w, *CHROME, axis=0), ink=2)
+    for (x, y) in ((0.22, 0.20), (0.30, 0.28), (0.14, 0.28)):
+        _poly(img, _ellipse_pts(ox + x * Lb, oy + y * Lb, 0.035 * Lb, 0.035 * Lb, n=20), (0.25, 0.70, 0.85), ink=2)
+    hl = np.zeros((h, w), np.float32)
+    cv2.ellipse(hl, (int(ox + 0.25 * Lb), int(oy - 0.25 * Lb)), (int(0.16 * Lb), int(0.05 * Lb)), -20, 0, 360, 1.0, -1, cv2.LINE_AA)
+    hl = cv2.GaussianBlur(hl, (0, 0), 5)
+    img[..., :3] = img[..., :3] * (1 - 0.45 * hl[..., None]) + 0.45 * hl[..., None]
+    _line(img, body, ink, closed=True)
+    return img, dict(strum=(ox + 0.62 * Lb, oy), bridge=(bx, oy), nut=(nx1, oy), spacing=0.022 * Lb, neck_w=neck_w,
+                     neck=(ox + Lb, oy), neck_len=neck_len)
+
+
+def strings(img, anc, ring, t, color=(0.85, 0.86, 0.88)):
+    """Six strings from bridge to nut; ringing strings blur into a wobbly band."""
+    out = img.copy()
+    (bx, by), (nx, ny) = anc["bridge"], anc["nut"]
+    sp = anc["spacing"]
+    xs = np.linspace(bx, nx, 60)
+    env = np.sin(np.pi * (xs - bx) / (nx - bx))
+    for i in range(6):
+        y0 = by + (i - 2.5) * sp
+        y1 = ny + (i - 2.5) * sp * 0.75
+        ys = y0 + (y1 - y0) * (xs - bx) / (nx - bx)
+        amp = ring * (2.5 + 0.4 * i)
+        for k, ph in enumerate((0.0, math.pi)):
+            yk = ys + amp * env * math.sin(2 * math.pi * (55 + 9 * i) * t + ph)
+            _line(out, np.stack([xs, yk], 1), 1.4 if k == 0 else 1.0, color=color)
+    return out

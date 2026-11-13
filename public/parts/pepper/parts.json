@@ -1,0 +1,42 @@
+{
+ "credit": "Painting: Pepper model sheet by David Revoy (peppercarrot.com), CC BY 4.0, cut out and animated",
+ "arm_l": {
+  "file": "arm_l.png",
+  "shoulder": [
+   235,
+   650
+  ],
+  "elbow": [
+   215,
+   855
+  ],
+  "wrist": [
+   135,
+   1085
+  ],
+  "grip": [
+   112,
+   1150
+  ]
+ },
+ "arm_r": {
+  "file": "arm_r.png",
+  "shoulder": [
+   571,
+   650
+  ],
+  "elbow": [
+   591,
+   855
+  ],
+  "wrist": [
+   671,
+   1085
+  ],
+  "grip": [
+   694,
+   1150
+  ]
+ },
+ "arm_width": 75
+}
