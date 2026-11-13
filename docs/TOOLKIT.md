@@ -1,7 +1,7 @@
 # Animating Ben's drawings: the toolkit
 
 The aim is reusable code for turning Ben's marker drawings into good animation, not one clip.
-`puppet/band.py` is one production built with it. This file says what each piece does, how to
+`clips/silence/clip.py` is one production built with it. This file says what each piece does, how to
 add a new character, and what we learned.
 
 ## Layout
