@@ -59,20 +59,32 @@ const ICON = {
   head: `<svg viewBox="0 0 56 56"><path ${S} d="M14 26 Q12 6 28 6 Q44 6 42 26 Q42 46 28 50 Q14 46 14 26Z"/><path ${S} d="M14 22 Q20 10 28 16 Q36 8 42 22"/><circle cx="22" cy="28" r="2.5" fill="#1b1714"/><circle cx="34" cy="28" r="2.5" fill="#1b1714"/><path ${S} d="M23 40 L33 40"/></svg>`,
   body: `<svg viewBox="0 0 56 56"><path ${S} d="M24 4 L24 12 L10 16 L12 52 L44 52 L46 16 L32 12 L32 4"/><path ${S} d="M28 14 L28 52"/></svg>`,
   "upper-arm": `<svg viewBox="0 0 56 56"><rect ${S} x="20" y="4" width="16" height="48" rx="8"/><circle cx="28" cy="12" r="2" fill="#b3132e"/><circle cx="28" cy="44" r="2" fill="#b3132e"/></svg>`,
-  "forearm-hand": `<svg viewBox="0 0 56 56"><rect ${S} x="21" y="2" width="14" height="32" rx="7"/><path ${S} d="M19 34 Q16 48 28 49 Q40 48 37 34Z"/><path ${S} d="M22 40 L33 40 M22 45 L33 45"/></svg>`,
-  leg: `<svg viewBox="0 0 56 56"><rect ${S} x="20" y="2" width="16" height="40" rx="8"/><path ${S} d="M20 40 L20 52 L46 52 Q46 44 36 42"/></svg>`,
+  "forearm-hand": `<svg viewBox="0 0 56 56"><rect ${S} x="21" y="2" width="14" height="40" rx="7"/></svg>`,
+  "eyes-closed": `<svg viewBox="0 0 56 56"><path ${S} d="M6 24 L24 24 M8 30 Q16 36 24 30"/><path ${S} d="M32 24 L50 24 M32 30 Q40 36 48 30"/></svg>`,
+  mouths: `<svg viewBox="0 0 56 56"><path ${S} d="M6 14 L22 14"/><ellipse ${S} cx="40" cy="14" rx="10" ry="5"/><ellipse ${S} cx="14" cy="40" rx="9" ry="10"/><ellipse ${S} cx="40" cy="40" rx="5" ry="8"/></svg>`,
+  "hand-stick": `<svg viewBox="0 0 56 56"><path ${S} d="M16 18 Q14 40 28 42 Q42 40 40 18Z"/><path ${S} d="M4 30 L52 22"/><path ${S} d="M20 24 L36 22 M20 30 L36 28"/></svg>`,
+  "hand-mic": `<svg viewBox="0 0 56 56"><path ${S} d="M16 22 Q14 44 28 46 Q42 44 40 22Z"/><path ${S} d="M28 30 L28 4"/><circle ${S} cx="28" cy="8" r="6"/></svg>`,
+  "hand-open": `<svg viewBox="0 0 56 56"><path ${S} d="M18 52 L18 30 L14 14 M24 30 L22 6 M30 30 L30 4 M36 30 L38 8 M38 34 L48 26 M18 52 L38 52 L38 30"/></svg>`,
+  leg: `<svg viewBox="0 0 56 56"><rect ${S} x="20" y="2" width="16" height="40" rx="8"/></svg>`,
+  shoe: `<svg viewBox="0 0 56 56"><path ${S} d="M10 20 L30 20 Q34 32 48 36 L48 44 L10 44Z"/></svg>`,
 };
 const PARTS = [
-  ["head", "Head", "Front view, with the neck. Eyes open, mouth closed (the computer opens the mouth and closes the eyes). Hair, ears, hat if any.", "ראש", "מלפנים, עם הצוואר. עיניים פתוחות, פה סגור (המחשב כבר פותח את הפה ועוצם את העיניים). עם שיער ואוזניים, וכובע אם יש."],
-  ["body", "Body", "Front view, shoulders to hips, with the clothes. No arms, no head. Keep the whole body on the page (nothing running off the edge).", "גוף", "מלפנים, מהכתפיים עד המותניים, עם הבגדים. בלי ידיים ובלי ראש. כל הגוף בתוך הדף (שום דבר לא נחתך בקצה)."],
-  ["upper-arm", "Upper arm", "Shoulder to elbow, in the sleeve, hanging straight down. Round ends.", "זרוע עליונה", "מהכתף עד המרפק, עם השרוול, ישר כלפי מטה. קצוות עגולים."],
-  ["forearm-hand", "Forearm + hand", "Elbow to fingers, straight down. Hand in a loose fist, as if holding a stick (it will hold the mic, drumsticks or a pick). Round end at the elbow.", "אמה + כף יד", "מהמרפק עד האצבעות, ישר כלפי מטה. כף היד אגרוף רפוי, כאילו מחזיקה מקל (היא תחזיק מיקרופון, מקלות תופים או מפרט). קצה עגול במרפק."],
-  ["leg", "Leg (optional)", "Hip to shoe, straight, shoe pointing sideways. Only if the character's legs show.", "רגל (לא חובה)", "מהמותן עד הנעל, ישרה, הנעל פונה הצידה. רק אם רואים את הרגליים של הדמות."],
+  ["head", "Head", "Front view, with the neck. Eyes open, mouth closed. Hair, ears, hat if any.", "ראש", "מלפנים, עם הצוואר. עיניים פתוחות, פה סגור. עם שיער ואוזניים, וכובע אם יש."],
+  ["eyes-closed", "Eyes closed", "Only the closed eyes (lid lines), same size as on the head.", "עיניים עצומות", "רק העיניים העצומות (קווי העפעף), באותו גודל כמו בראש."],
+  ["mouths", "Mouths", "4 mouths on one page, same size as on the head: closed, a little open, wide open (shouting), round (\"ooh\").", "פיות", "4 פיות בדף אחד, באותו גודל כמו בראש: סגור, קצת פתוח, פתוח לגמרי (צועק), עגול (״אוּ״)."],
+  ["body", "Body", "Front view, shoulders to hips, with the clothes. No arms, no head. The whole body on the page.", "גוף", "מלפנים, מהכתפיים עד המותניים, עם הבגדים. בלי ידיים ובלי ראש. כל הגוף בתוך הדף."],
+  ["upper-arm", "Upper arm", "Shoulder to elbow, in the sleeve, straight down. Round ends.", "זרוע עליונה", "מהכתף עד המרפק, עם השרוול, ישר למטה. קצוות עגולים."],
+  ["forearm-hand", "Forearm", "Elbow to wrist, in the sleeve with the cuff, straight down. No hand.", "אמה", "מהמרפק עד שורש כף היד, עם השרוול והחפת, ישר למטה. בלי כף יד."],
+  ["hand-stick", "Hand holding a stick", "A fist around a drumstick (or a pencil), seen from the back of the hand.", "יד מחזיקה מקל", "אגרוף סביב מקל תופים (או עיפרון), רואים את גב כף היד."],
+  ["hand-mic", "Hand holding a mic", "A fist around a microphone handle, thumb on top.", "יד מחזיקה מיקרופון", "אגרוף סביב ידית של מיקרופון, האגודל למעלה."],
+  ["hand-open", "Open hand", "Relaxed open hand, fingers a little apart, seen from the back.", "יד פתוחה", "יד פתוחה ורגועה, האצבעות קצת פתוחות, רואים את גב כף היד."],
+  ["leg", "Leg (optional)", "Hip to ankle, straight, in the trousers. Only if the legs show.", "רגל (לא חובה)", "מהמותן עד הקרסול, ישרה, עם המכנסיים. רק אם רואים את הרגליים."],
+  ["shoe", "Shoe (optional)", "One shoe, from the front-side, toe pointing a little to the side.", "נעל (לא חובה)", "נעל אחת, מלפנים-מהצד, הבוהן פונה קצת הצידה."],
 ];
 const CHARS = [["singer", "Singer", "זמר"], ["guitarist", "Guitarist", "גיטריסט"], ["drummer", "Drummer", "מתופף"]];
 const TXT = {
-  en: { title: "Ben's band", tips: "One part per page · white paper, closed black outlines, color as usual · all parts at the same size (the head about as big as your hand) · arms straight, round ends where parts join · the computer bends the arms and moves the face · photo from straight above, good light, the whole page in the picture.", count: (n, m) => `${n} of ${m} parts`, done: "Done → Claude", copied: "Copied. Paste it to Claude.", nokey: "This link is missing its key." },
-  he: { title: "הלהקה של בן", tips: "חלק אחד בכל דף · דף לבן, קווי מתאר שחורים וסגורים, צביעה כרגיל · כל החלקים באותו גודל (הראש בערך בגודל כף היד) · ידיים ישרות, קצוות עגולים איפה שחלקים מתחברים · המחשב מכופף את הידיים ומזיז את הפנים · צילום מלמעלה, באור טוב, כל הדף בתמונה.", count: (n, m) => `${n} מתוך ${m} חלקים`, done: "סיימתי ← Claude", copied: "הועתק. להדביק ל-Claude.", nokey: "חסר מפתח בקישור." },
+  en: { title: "Ben's band", tips: "One part per page · white paper, closed black outlines, color as usual · all parts at the same size (the head about as big as your hand) · arms straight, round ends where parts join · the computer bends the arms and moves the face; your mouths, closed eyes and hands make it look like you · photo from straight above, good light, the whole page in the picture.", count: (n, m) => `${n} of ${m} parts`, done: "Done → Claude", copied: "Copied. Paste it to Claude.", nokey: "This link is missing its key." },
+  he: { title: "הלהקה של בן", tips: "חלק אחד בכל דף · דף לבן, קווי מתאר שחורים וסגורים, צביעה כרגיל · כל החלקים באותו גודל (הראש בערך בגודל כף היד) · ידיים ישרות, קצוות עגולים איפה שחלקים מתחברים · המחשב מכופף את הידיים ומזיז את הפנים; הפיות, העיניים העצומות והידיים שלך גורמים לזה להיראות כמו שלך · צילום מלמעלה, באור טוב, כל הדף בתמונה.", count: (n, m) => `${n} מתוך ${m} חלקים`, done: "סיימתי ← Claude", copied: "הועתק. להדביק ל-Claude.", nokey: "חסר מפתח בקישור." },
 };
 const key = new URLSearchParams(location.search).get("k") || "";
 let lang = localStorage.getItem("benlang") || "en";

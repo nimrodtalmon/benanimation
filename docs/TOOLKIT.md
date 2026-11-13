@@ -4,6 +4,24 @@ The aim is reusable code for turning Ben's marker drawings into good animation, 
 `puppet/band.py` is one production built with it. This file says what each piece does, how to
 add a new character, and what we learned.
 
+## Layout
+
+```
+puppet/            the toolkit (generic, reused by every clip)
+  cutout.py        photo -> sprite             warp.py     drawing + landmarks -> face/head motion
+  ben_mouths.py    mouth sheets                limb.py     bending arms (IK)
+  standins.py      code-drawn missing parts    hand.py     rigged hands (+ StickHand)
+  props.py         instruments, marker()       motion.py   HeadMotion, Spring, decay_since
+  song.py          Song: score + audio + vocal drivers
+  production.py    stage, crowd, camera finish, Production (shot list, parallel render, stills)
+  cast/            one module per character: distor.py, pepper.py, coriander.py
+clips/<name>/clip.py   a clip = Song + cast + SHOTS (see clips/_template/clip.py)
+```
+
+A character class has `__init__(song, scale, cx, top)`, `draw(frame, t)`, `j["credit"]`, and
+optionally `advance(f)` (springs that must keep running while it is off camera). It reads all
+timing from `song` (never from a global), so it works in any clip with any song.
+
 ## Pipeline
 
 1. **Photo → sprite.** `puppet/cutout.py`
@@ -40,8 +58,8 @@ add a new character, and what we learned.
    - `Spring`: smooth following motion.
    - `decay_since`: jumps on a hit, then decays.
    - Every move is timed from `src/song.json` (drums, strums, sung notes) and the vocal loudness.
-8. **Shots.** `band.py`: stage lights, crowd, camera push, a shot list cut on the bar, credits.
-   The clip renders in two halves in parallel.
+8. **Shots.** `production.py` (`Production`): stage lights, crowd, camera push, a shot list,
+   credits. It renders the clip in two halves in parallel. `stills` renders single frames for checking.
 
 ## Adding a character (checklist)
 
@@ -51,9 +69,10 @@ add a new character, and what we learned.
 3. Joints in `parts.json`: shoulder and elbow on the upper arm, elbow and wrist (+ grip) on the
    forearm. One arm drawing serves both arms (mirrored).
 4. Optional: mouth sheet (`ben_mouths.py`), closed eye (`cutout.ink_sprite`), iris color.
-5. Write a `draw(frame, t)` that maps song events to targets. Use `motion.py` for the timing,
-   IK for the arms, `hand.py` for anything held.
-6. Render 1-second tests and look at stills before rendering the full clip.
+5. Write `puppet/cast/<name>.py` with `draw(frame, t)` that maps song events to targets. Use
+   `motion.py` for the timing, IK for the arms, `hand.py` for anything held.
+6. Add the character to a clip's CAST. Run `clip.py stills ...` and look at the frames before
+   `clip.py video`.
 
 ## Lessons so far
 

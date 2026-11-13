@@ -17,10 +17,12 @@ Everything in Python + OpenCV (`puppet/`), every move timed to the song (`src/so
 - `puppet/motion.py`: HeadMotion (holds, eased moves, accent nods, blinks), Spring, decay_since.
 - `puppet/cutout.py`: photo -> sprite helpers (paper flatten, paper cutout, ink-only sprites).
 - `puppet/props.py`: mic, drum kit (sparkle shells, chrome hoops, stands; Ben's skull on the kick), guitar, strap, drawn in code.
-- `puppet/band.py`: Singer (Ben's Distor + code stand-in arms), Drummer (David Revoy's Pepper model sheet, CC BY 4.0),
-  Guitarist (Revoy's Coriander concept art, CC BY 4.0), stage, crowd, shot list.
-  - `python3 puppet/band.py singer|drummer|guitarist [start dur]` -> `out/band-<who>.mp4`
-  - `python3 puppet/band.py video` -> `out/band-video.mp4` (44 s, cuts on the bar; renders two halves in parallel, ~10 min)
+- `puppet/cast/`: Singer (`distor.py`, Ben's drawing), Drummer (`pepper.py`, David Revoy's Pepper model sheet, CC BY 4.0),
+  Guitarist (`coriander.py`, Revoy's Coriander concept art, CC BY 4.0).
+- `puppet/song.py`, `puppet/production.py`: Song (score + audio + vocal drivers), stage/camera/shot list/rendering.
+  - `python3 clips/silence/clip.py video` -> `out/silence.mp4` (44 s; two halves in parallel, ~8 min)
+  - `python3 clips/silence/clip.py stills 3 15 21` / `... singer 8 6` (one character alone)
+  - new clip: copy `clips/_template/`
 - `puppet/ben_mouths.py`: cuts Ben's mouth poses from his photographed sheet (`drawings/ben/mouths-sheet.jpg`); the singer sings with them.
 - `puppet/standins.py`: Distor's stand-in arms (from Ben's new page `drawings/ben/distor-front-v2.png`) and the jacket continued past the paper edge -> `public/parts/distor/`.
 - `puppet/cutout_paint.py`: cut-outs of the Revoy paintings (sources in `drawings/revoy/`) and Pepper's arms -> `public/parts/pepper/`.

@@ -289,6 +289,18 @@ def _blink_drawn(self, img, k, turn):
 Puppet.blink_drawn = _blink_drawn
 
 
+def load_rgba(path):
+    return cv2.imread(path, cv2.IMREAD_UNCHANGED).astype(np.float32) / 255
+
+
+def over_sub(dst, img, xy, frac):
+    """Composite a BGRA layer at a sub-pixel position (smooth, delicate motion)."""
+    if abs(frac[0]) > 1e-3 or abs(frac[1]) > 1e-3:
+        M = np.float32([[1, 0, frac[0]], [0, 1, frac[1]]])
+        img = cv2.warpAffine(img, M, (img.shape[1] + 1, img.shape[0] + 1), flags=cv2.INTER_LINEAR, borderValue=0)
+    over(dst, img, int(xy[0]), int(xy[1]))
+
+
 def over(dst, src, x, y):
     """Alpha-composite BGRA float src onto BGR float dst at (x, y)."""
     h, w = src.shape[:2]

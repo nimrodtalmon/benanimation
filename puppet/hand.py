@@ -305,3 +305,48 @@ class Hand:
         L = self.last
         q = L["P"](p)
         return np.array([(q[0] - L["lo"][0]) * L["k"], (q[1] - L["lo"][1]) * L["k"]]) + L["off"]
+
+
+class StickHand:
+    """A rigged hand holding a drumstick. The stick sits between thumb and index (the fulcrum);
+    the wrist bends up to a limit, the rest of the stick angle is a pivot in the fingers."""
+    FULCRUM = np.array([0.06, 0.44, -0.115])
+    S0 = np.array([0.75, 0.62, 0.0]) / np.linalg.norm([0.75, 0.62, 0.0])
+
+    def __init__(self, skin, size, mirror, pitch=-38, roll=0, style=None):
+        st = style or Style(skin=np.array(skin) / 255, ink=(0.16, 0.12, 0.12), ink_w=0.016, shade=0.5)
+        self.h = Hand(st, mirror=mirror)
+        self.size, self.mirror, self.pitch, self.roll = size, mirror, pitch, roll
+        self.L = 1.85  # stick length in hand lengths
+        self.Mr = np.diag([-1.0, 1, 1]) if mirror else np.eye(3)
+
+    def _T(self, yaw):
+        return orient(yaw, self.pitch, self.roll) @ self.Mr
+
+    def solve(self, phi, fore_angle):
+        """phi: wanted stick angle on screen (rad); fore_angle: forearm angle (rad).
+        Returns yaw (deg) and the stick direction in hand space."""
+        T0 = self._T(0)
+        d0 = T0 @ self.S0
+        a0 = math.atan2(d0[1], d0[0])
+        yaw_stick = math.degrees(phi - a0)
+        yaw_arm = math.degrees(fore_angle) - 90
+        dy = (yaw_stick - yaw_arm + 180) % 360 - 180
+        yaw = yaw_arm + max(-38, min(38, dy))
+        delta = phi - (math.radians(yaw) + a0)
+        T = self._T(yaw)
+        Rz = _rot((0, 0, 1), delta)
+        s_hand = np.linalg.solve(T, Rz @ (T @ self.S0))
+        return yaw, s_hand
+
+    def tip_offset(self, yaw, s_hand, anchor):
+        T = self._T(yaw)
+        tip = self.FULCRUM + s_hand * self.L * 0.78
+        return ((T @ tip)[:2] - (T @ np.asarray(anchor))[:2]) * self.size
+
+    def render(self, yaw, s_hand, loose, wrist, anchor):
+        pose = Pose.mix(POSES["stick"], POSES["stick_loose"], float(np.clip(loose, 0, 1)))
+        g = self.FULCRUM
+        held = [dict(p0=g - s_hand * self.L * 0.22, p1=g + s_hand * self.L * 0.78, r0=0.042, r1=0.028, color=(0.42, 0.66, 0.84), gloss=0.35),
+                dict(p0=g + s_hand * self.L * 0.79, p1=g + s_hand * self.L * 0.80, r0=0.036, r1=0.036, color=(0.50, 0.74, 0.90), gloss=0.5)]
+        return self.h.render(pose, orient(yaw, self.pitch, self.roll), self.size, wrist, anchor=anchor, held=held)
