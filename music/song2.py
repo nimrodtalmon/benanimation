@@ -22,13 +22,14 @@ sys.path.insert(0, os.path.dirname(__file__))
 import score  # noqa: E402
 
 START, LENGTH = 14.02, 44.0  # excerpt in the original (first beat of a bar, 22 bars at 120 BPM)
+VOX_OFFSET = 6.0  # the vocal stem starts 6.0 s into the full mix (measured by cross-correlation)
 # Rhubarb mouth shapes -> our vowels and how open
 SHAPES = {"B": ("ee", 0.35), "C": ("ah", 0.6), "D": ("ah", 1.0), "E": ("oh", 0.75), "F": ("oo", 0.6), "G": ("ee", 0.25), "H": ("ah", 0.5)}
 
 
 def main(stems):
     sh = lambda *a: subprocess.run(list(a), check=True, capture_output=True)  # noqa: E731
-    sh("ffmpeg", "-y", "-ss", str(START), "-t", str(LENGTH), "-i", f"{stems}/vocals.flac", "-ac", "1", "-ar", "16000", "/tmp/vox.wav")
+    sh("ffmpeg", "-y", "-ss", str(START - VOX_OFFSET), "-t", str(LENGTH), "-i", f"{stems}/vocals.flac", "-ac", "1", "-ar", "16000", "/tmp/vox.wav")
     sh("ffmpeg", "-y", "-ss", str(START), "-t", str(LENGTH), "-i", f"{stems}/mix.mp3", "-ar", "44100", "/tmp/mix.wav")
     sh(f"{stems}/Rhubarb-Lip-Sync-1.14.0-Linux/rhubarb", "-f", "json", "--extendedShapes", "GHX", "-r", "phonetic", "-o", "/tmp/cues.json", "/tmp/vox.wav")
 

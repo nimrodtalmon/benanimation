@@ -26,12 +26,14 @@ ROOT = "/home/claude/benanimation"
 
 CHARS = {
     "pepper": dict(
-        head="public/paint/pepper-head.png", body="public/paint/pepper-body.png", src_h=2207, height=1500, top=-30,
+        full="public/paint/pepper-full.png", src_h=2207, height=1500, top=-30,
+        head_ells=[(900, 380, 560, 330), (905, 850, 290, 270)], neck=(780, 1030, 990, 1170),
         face=(905, 850, 235, 265), pivot=(900, 1090), mouth=(910, 922, 42, 36), chin=995,
         eyes=[(790, 750, 60, 40), (1012, 748, 58, 40)], lid_from=118, lash=(42, 29, 31), lash_w=8,
         hair_from=820, turn_px=26, bg="pepper", credit='Painting: "Portrait of Pepper" by David Revoy, CC BY 4.0, animated'),
     "distor": dict(
-        head="public/chars/distor-front-head.png", body="public/chars/distor-front-body.png", src_h=1600, height=1350, top=-60,
+        full="public/chars/distor-front.png", src_h=1600, height=1350, top=-60,
+        head_ells=[(530, 450, 340, 270), (535, 735, 400, 300)], neck=(380, 700, 1010, 1130),
         face=(535, 735, 255, 300), pivot=(520, 1000), mouth=(562, 862, 105, 60), chin=1015,
         eyes=[(420, 556, 118, 58), (737, 578, 120, 74)], lid_from=150, lash=(20, 18, 19), lash_w=16,
         lid_color=(745, 735), hair_from=700, turn_px=18, bg="stage", credit="Drawing: Ben"),
@@ -81,8 +83,7 @@ class Puppet:
         self.c = cfg
         s = cfg["height"] / cfg["src_h"]
         self.s = s
-        self.head = load(cfg["head"], s)
-        self.body = load(cfg["body"], s)
+        self.head = load(cfg["full"], s)
         h, w = self.head.shape[:2]
         self.X, self.Y = np.meshgrid(np.arange(w, dtype=np.float32), np.arange(h, dtype=np.float32))
         S = lambda v: v * s  # noqa: E731
@@ -106,6 +107,15 @@ class Puppet:
         self.w_jaw = gx * below * fade
         self.w_lip = gx * np.exp(-((my - Y) / (mw * 0.3)) ** 2) * (Y < my)
         self.w_hair = np.clip((Y - self.hair_from) / (fry * 0.9), 0, 1) * self.w_out
+        wh = np.zeros_like(X)
+        for (cx, cy, rx, ry) in cfg["head_ells"]:
+            r = np.sqrt(((X - cx * s) / (rx * s)) ** 2 + ((Y - cy * s) / (ry * s)) ** 2)
+            wh = np.maximum(wh, np.clip((1.12 - r) / 0.27, 0, 1))
+        nx0, nx1, ny0, ny1 = (v * s for v in cfg["neck"])
+        band = np.clip(np.minimum(X - nx0, nx1 - X) / (0.15 * (nx1 - nx0)), 0, 1)
+        wn = band * np.clip((ny1 - Y) / (ny1 - ny0), 0, 1) * (Y > ny0 - 0.3 * (ny1 - ny0))
+        w = np.maximum(wh, wn)
+        self.w_bend = (w * w * (3 - 2 * w)).astype(np.float32)
 
     def head_frame(self, turn, mouth, vowel, blink, sway):
         mx, my, mw, J = self.mouth
@@ -215,8 +225,8 @@ def render(name, start=8.0, dur=15.0):
     p = Puppet(cfg)
     n = int(dur * FPS)
     env, vowels = drivers(start, n)
-    hb, wb = p.body.shape[:2]
-    x0 = (W - wb) // 2
+    hl, wl = p.head.shape[:2]
+    x0 = (W - wl) // 2
     out = f"{ROOT}/out/warp-{name}.mp4"
     ff = subprocess.Popen(["ffmpeg", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-",
                            "-ss", str(start), "-t", str(dur), "-i", f"{ROOT}/public/song/song.wav",
@@ -237,17 +247,18 @@ def render(name, start=8.0, dur=15.0):
         k = int(t / 3.3)
         bt = t - (k * 3.3 + (k * 7 % 10) / 11)
         blink = max(0.0, 1 - abs(bt - 0.07) / 0.07) if 0 <= bt < 0.14 else 0.0
-        head = p.head_frame(turn, float(env[f]), vowels[f], blink, sway)
-        # tilt + nod around the neck pivot
-        M = cv2.getRotationMatrix2D((p.pivot[0], p.pivot[1]), -tilt, 1.0)
-        M[1, 2] += nod
-        head = cv2.warpAffine(head, M, (head.shape[1], head.shape[0]), flags=cv2.INTER_LINEAR, borderValue=0)
-        breathe = 1 + 0.006 * math.sin(t * 1.7)
-        body = cv2.resize(p.body, (wb, int(hb * breathe)))
+        fig = p.head_frame(turn, float(env[f]), vowels[f], blink, sway)
+        # bend: the head rotates/nods, the neck follows smoothly, the body breathes
+        th = math.radians(tilt) * p.w_bend
+        px, py = p.pivot
+        ox, oy = p.X - px, p.Y - py
+        c, sn = np.cos(th), np.sin(th)
+        breathe = 0.006 * math.sin(t * 1.7) * (1 - p.w_bend)
+        mapx = px + c * ox + sn * oy
+        mapy = py - sn * ox + c * oy - nod * p.w_bend - breathe * (p.Y - hl)
+        fig = cv2.remap(fig, mapx.astype(np.float32), mapy.astype(np.float32), cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
         frame = background(cfg["bg"], t, beat)
-        yb = cfg["top"] + hb - body.shape[0] + int(3 * math.sin(t * 1.7))
-        over(frame, body, x0, yb)
-        over(frame, head, x0, cfg["top"] + int(3 * math.sin(t * 1.7)))
+        over(frame, fig, x0, cfg["top"] + int(3 * math.sin(t * 1.7)))
         # camera: slow push + tiny drift
         z = 1 + 0.06 * f / n
         C = cv2.getRotationMatrix2D((W / 2 + 8 * math.sin(t * 0.8), H * 0.42), 0, z)
