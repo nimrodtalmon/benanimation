@@ -22,7 +22,8 @@ import cv2
 import numpy as np
 
 FPS, W, H = 30, 1920, 1080
-ROOT = "/home/claude/benanimation"
+import os
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 CHARS = {
     "pepper": dict(
@@ -50,7 +51,7 @@ def load(path, scale):
 def drivers(start, n):
     song = json.load(open(f"{ROOT}/src/song.json"))
     sr = 16000
-    raw = subprocess.run(["ffmpeg", "-loglevel", "error", "-i", "/home/claude/stems/vox_ex.wav", "-f", "f32le", "-ac", "1", "-ar", str(sr), "-"],
+    raw = subprocess.run(["ffmpeg", "-loglevel", "error", "-i", f"{ROOT}/public/song/vocals.wav", "-f", "f32le", "-ac", "1", "-ar", str(sr), "-"],
                          capture_output=True).stdout
     y = np.frombuffer(raw, np.float32)
     hop = sr // FPS
