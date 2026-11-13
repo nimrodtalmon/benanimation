@@ -19,6 +19,7 @@ from limb import Limb, join_parts  # noqa: E402
 import props  # noqa: E402
 from props import blit, microphone, place  # noqa: E402
 import hand as handrig  # noqa: E402
+from motion import HeadMotion, Spring, decay_since  # noqa: E402
 
 ROOT = warp.ROOT
 FPS, W, H = warp.FPS, warp.W, warp.H
@@ -29,19 +30,6 @@ BAR = 4 * SPB
 
 def load_rgba(path):
     return cv2.imread(path, cv2.IMREAD_UNCHANGED).astype(np.float32) / 255
-
-
-class Spring:
-    """Critically damped follower: smooth, slightly lagging motion toward a moving target."""
-
-    def __init__(self, x, omega=9.0, zeta=1.0):
-        self.x, self.v, self.w, self.z = np.array(x, float), np.zeros_like(np.array(x, float)), omega, zeta
-
-    def step(self, target, dt=1 / FPS):
-        a = self.w * self.w * (np.asarray(target, float) - self.x) - 2 * self.z * self.w * self.v
-        self.v = self.v + a * dt
-        self.x = self.x + self.v * dt
-        return self.x
 
 
 def song_drivers():
@@ -57,73 +45,6 @@ def song_drivers():
         if 1 < b - a < 1.4 * FPS:
             sing[a:b] = True
     return env, vowels, sing.astype(float)
-
-
-class HeadMotion:
-    """Head and body motion like a performer, not a metronome: the head holds a pose, then moves
-    to a new one (chosen per phrase) with a springy ease and a little overshoot; nods come as
-    accents on chosen hits (fast down, slow up) instead of a constant bob; blinks at irregular
-    times and when the head starts a big move. Deterministic in t (simulated from 0, cached)."""
-
-    def __init__(self, seed, accents, turn_amp=0.7, tilt_amp=4.0, nod_px=10.0, hold=(1.6, 4.0)):
-        rng = np.random.default_rng(seed)
-        n = int(SONG["duration"] * FPS) + 2
-        dt = 1 / FPS
-        # pose targets: piecewise constant, changes on beats
-        tgt = np.zeros((n, 2))
-        t, cur = 0.0, np.zeros(2)
-        changes = []
-        while t < SONG["duration"]:
-            cur = np.array([np.clip(rng.normal(0, 0.55), -1, 1) * turn_amp, np.clip(rng.normal(0, 0.6), -1, 1) * tilt_amp])
-            d = rng.uniform(*hold)
-            t1 = round((t + d) / SPB) * SPB
-            tgt[int(t * FPS):int(t1 * FPS) + 1] = cur
-            changes.append(t)
-            t = max(t1, t + SPB)
-        # springy follow (slightly underdamped) + a tiny drift
-        x, v = np.zeros(2), np.zeros(2)
-        w, z = 6.5, 0.62
-        self.pose = np.zeros((n, 2))
-        self.vel = np.zeros((n, 2))
-        for i in range(n):
-            a = w * w * (tgt[i] - x) - 2 * z * w * v
-            v = v + a * dt
-            x = x + v * dt
-            self.pose[i], self.vel[i] = x, v
-        tt = np.arange(n) / FPS
-        self.pose[:, 0] += 0.04 * turn_amp * np.sin(tt * 1.1 + seed)
-        self.pose[:, 1] += 0.15 * tilt_amp * np.sin(tt * 0.7 + 2 * seed)
-        # accent nods: fast attack (~60 ms), slow release (~400 ms), with velocity
-        nod = np.zeros(n)
-        for (ta, amp) in accents:
-            i0 = int(ta * FPS)
-            for k in range(0, int(0.9 * FPS)):
-                if i0 + k < n:
-                    u = k / FPS
-                    nod[i0 + k] += amp * (1 - math.exp(-u / 0.035)) * math.exp(-u / 0.28)
-        self.nod = np.clip(nod, 0, 1.4) * nod_px
-        # blinks: irregular, plus at the start of big head moves
-        bl = []
-        t = rng.uniform(0.5, 2.0)
-        while t < SONG["duration"]:
-            bl.append(t)
-            t += rng.uniform(2.0, 5.5)
-        for c in changes:
-            if rng.uniform() < 0.6:
-                bl.append(c + 0.03)
-        self.blinks = np.array(sorted(bl))
-
-    def at(self, t):
-        i = min(int(t * FPS), len(self.pose) - 1)
-        turn, tilt = self.pose[i]
-        j = np.searchsorted(self.blinks, t) - 1
-        blink = 0.0
-        if j >= 0:
-            u = t - self.blinks[j]
-            if u < 0.16:
-                blink = min(1.0, u / 0.05) if u < 0.05 else max(0.0, 1 - (u - 0.05) / 0.11)
-        sway = -self.vel[i, 0]  # hair lags behind the head's turn
-        return float(turn), float(tilt), float(self.nod[i]), blink, float(sway)
 
 
 def vocal_accents(env, sing):
@@ -147,12 +68,14 @@ class Singer:
         base = warp.CHARS["distor"]
         sx = lambda v: v + pad  # noqa: E731
         cfg = dict(base)
-        cfg.update(full="public/parts/distor/body.png", src_h=1600, height=1600 * scale,
+        cfg.update(full="public/parts/distor/body.png", src_h=1600, height=1600 * scale, crop_h_src=(H - top) / scale + 120,
                    head_ells=[(sx(x), y, rx, ry) for x, y, rx, ry in base["head_ells"]],
                    neck=(sx(base["neck"][0]), sx(base["neck"][1]), base["neck"][2], base["neck"][3]),
                    face=(sx(base["face"][0]),) + tuple(base["face"][1:]), pivot=(sx(base["pivot"][0]), base["pivot"][1]),
                    mouth=(sx(base["mouth"][0]),) + tuple(base["mouth"][1:]),
-                   eyes=[(sx(x), y, rx, ry) for x, y, rx, ry in base["eyes"]], lid_color=(sx(base["lid_color"][0]), base["lid_color"][1]))
+                   eyes=[(sx(x), y, rx, ry) for x, y, rx, ry in base["eyes"]], lid_color=(sx(base["lid_color"][0]), base["lid_color"][1]),
+                   irises=[(sx(x), y, r) for x, y, r in base.get("irises", [])],
+                   eye_hide=[(sx(x), y, rx, ry) for x, y, rx, ry in base.get("eye_hide", [])])
         self.p = warp.Puppet(cfg)
         self.s = scale
         self.cfg, self.j = cfg, j
@@ -182,8 +105,8 @@ class Singer:
         self.hand_a0 = math.atan2(h0[1], h0[0])  # wrist-to-fingers axis on screen at yaw 0
         self.anchor = (0.0, -0.05, 0.0)
         self.env, self.vowels, self.sing = song_drivers()
-        self.motion = HeadMotion(1, vocal_accents(self.env, self.sing), turn_amp=0.75, tilt_amp=4.0, nod_px=9 * scale / 0.5)
-        self.up = Spring(0.0, omega=7.0)
+        self.motion = HeadMotion(1, vocal_accents(self.env, self.sing), SONG["duration"], SPB, turn_amp=0.5, tilt_amp=3.0, nod_px=6 * scale / 0.5)
+        self.up = Spring(0.0, omega=5.0)
         self.free = None
         self.prev_turn = 0.0
 
@@ -226,7 +149,7 @@ class Singer:
         if pump:
             free_t = shR + np.array([-180, 420 - 160 * math.sin(math.pi * ph * 2)]) * s
         if self.free is None:
-            self.free = Spring(free_t, omega=11.0, zeta=0.75)
+            self.free = Spring(free_t, omega=6.0, zeta=0.95)
         wt = self.free.step(free_t)
         E, Wr = self.arm_r.solve(shR, wt, s)
         fa = math.degrees(math.atan2(Wr[1] - E[1], Wr[0] - E[0])) - 90
@@ -333,16 +256,10 @@ PEPPER_HEAD = dict(
 DRUM = dict(KICK=36, SNARE=38, HAT=42, OPEN_HAT=46, CRASH=49, TOM_HI=50, TOM_MID=47, TOM_LO=45)
 
 
-def decay_since(t, times, tau):
-    """exp(-(t - last event)/tau) for the most recent event before t (0 if none)."""
-    i = np.searchsorted(times, t, side="right") - 1
-    return math.exp(-(t - times[i]) / tau) if i >= 0 else 0.0, (t - times[i]) if i >= 0 else 9.0
-
-
 class Drummer:
     PARTS = f"{ROOT}/public/parts/pepper"
 
-    def __init__(self, scale=0.72, cx=W / 2, top=30):
+    def __init__(self, scale=0.6, cx=W / 2, top=20):
         j = json.load(open(f"{self.PARTS}/parts.json"))
         cfg = dict(PEPPER_HEAD, full="public/parts/pepper/body.png", height=1400 * scale)
         self.p = warp.Puppet(cfg)
@@ -357,16 +274,21 @@ class Drummer:
         P = lambda x, y: (self.x0 + x * s, top + y * s)  # noqa: E731  crop coords -> screen
         # the kit, placed in the drummer's (crop) coordinates
         skull = cv2.imread(f"{ROOT}/public/clip/skull.png", cv2.IMREAD_UNCHANGED)
+        # an open-handed kit seen from the audience: hi-hat and snare on the viewer's right (played
+        # by the near hand, no crossing), rack toms on the bass drum angled toward her, floor tom
+        # and ride on the viewer's left
         self.kit = dict(
             kick=(props.kick_front(330 * s, skull), P(403, 1470)),
-            floor=(props.drum(165 * s, 180 * s, seed=4), P(70, 1255)),
-            tom_hi=(props.drum(128 * s, 105 * s, seed=1), P(300, 1100)),
-            tom_mid=(props.drum(135 * s, 110 * s, seed=2), P(515, 1100)),
-            snare=(props.drum(150 * s, 70 * s, chrome=True, seed=5), P(225, 1185)),
-            hat=(props.cymbal(132 * s), P(625, 1150)),
-            hat_low=(props.cymbal(132 * s), P(625, 1168)),
-            crash=(props.cymbal(185 * s), P(705, 900)),
+            floor=(props.drum(160 * s, 185 * s, seed=4), P(95, 1265)),
+            tom_mid=(props.drum(112 * s, 100 * s, tilt=0.24, seed=2), P(300, 1065)),
+            tom_hi=(props.drum(104 * s, 95 * s, tilt=0.24, seed=1), P(505, 1065)),
+            snare=(props.drum(140 * s, 68 * s, chrome=True, tilt=0.34, seed=5), P(610, 1125)),
+            hat=(props.cymbal(128 * s), P(740, 1145)),
+            hat_low=(props.cymbal(128 * s), P(740, 1163)),
+            crash=(props.cymbal(180 * s), P(770, 880)),
+            ride=(props.cymbal(200 * s, tilt=0.26), P(40, 975)),
         )
+        self.tilt_deg = dict(tom_mid=9, tom_hi=-9, floor=0, snare=-3, kick=0)
         self.floor_y = P(0, 1760)[1]
         self.ao = None
         hs = j["hand"]
@@ -375,7 +297,7 @@ class Drummer:
         # which hand plays what: viewer's left (her right hand) = snare and toms, viewer's right = hats and crash
         piece_at = {DRUM["SNARE"]: "snare", DRUM["TOM_HI"]: "tom_hi", DRUM["TOM_MID"]: "tom_mid", DRUM["TOM_LO"]: "floor",
                     DRUM["HAT"]: "hat", DRUM["OPEN_HAT"]: "hat", DRUM["CRASH"]: "crash"}
-        hand_of = {"snare": "l", "tom_hi": "l", "tom_mid": "r", "floor": "l", "hat": "r", "crash": "r"}
+        hand_of = {"snare": "l", "tom_hi": "r", "tom_mid": "l", "floor": "l", "hat": "r", "crash": "r"}
         self.hits = {"l": [], "r": []}
         for d in sorted(SONG["drums"], key=lambda d: d["t"]):
             if d["piece"] not in piece_at:
@@ -394,7 +316,7 @@ class Drummer:
         self.prev_turn = 0.0
         self.prev_fore = {}
         acc = [(d["t"], 0.5 + 0.5 * d["vel"] / 127) for d in SONG["drums"] if d["piece"] in (38, 49) and (d["t"] % BAR) < 0.05 + BAR / 2]
-        self.motion = HeadMotion(7, acc, turn_amp=0.45, tilt_amp=3.0, nod_px=12 * scale)
+        self.motion = HeadMotion(7, acc, SONG["duration"], SPB, turn_amp=0.35, tilt_amp=2.5, nod_px=7 * scale)
 
     def strike_point(self, what, side):
         img, anc = self.kit[what][0]
@@ -435,7 +357,7 @@ class Drummer:
         tip = p0 * (1 - e) + p1 * e  # where the tip would be with the stick down
         ang = a0 * (1 - e) + a1 * e
         lift = math.sin(math.pi * u ** 0.7) * min(1.0, gap / 0.45) * (0.6 + 0.4 * v1 / 127)
-        ang_now = ang + sgn * math.radians(58) * lift  # the wrist flicks the stick up
+        ang_now = ang + sgn * math.radians(45) * lift  # the wrist flicks the stick up
         return tip, ang, ang_now, lift
 
     def draw(self, frame, t):
@@ -444,7 +366,7 @@ class Drummer:
         ph = (t % SPB) / SPB
         kick, _ = decay_since(t, self.times["kick"], 0.12)
         snare, _ = decay_since(t, self.times["snare"], 0.18)
-        bounce = 6 * s / 0.72 * kick
+        bounce = 3 * s / 0.72 * kick
         # head: nods on the snare, glances a little toward the busy hand
         turn, tilt, nod, blink, sway = self.motion.at(t)
         sway = sway * 35 * p.s
@@ -502,6 +424,10 @@ class Drummer:
         crash, _ = decay_since(t, self.times["crash"], 0.7)
         hat, dt_hat = decay_since(t, self.times["hat"], 0.15)
         opened = decay_since(t, self.times["open"], 0.35)[0]
+        rx_, ry_ = self.kit["ride"][1]
+        props.stand(frame, (rx_, ry_), min(H + 30, self.floor_y), sw)
+        img, anc = self.kit["ride"][0]
+        blit(frame, img, place(img, anc["center"], (rx_, ry_), math.radians(6), 1.0))
         for what in ("hat_low", "hat", "crash"):
             img, anc = self.kit[what][0]
             x, y = self.kit[what][1]
@@ -513,19 +439,23 @@ class Drummer:
             else:
                 ang = 0.0
             blit(frame, img, place(img, anc["center"], (x, y), ang, 1.0))
-        for what in ("floor", "tom_hi", "tom_mid"):
-            pass
-        for (tw, ax) in (("tom_hi", -60), ("tom_mid", 60)):  # tom arms out of the bass drum
+        fx, fy = self.kit["floor"][1]
+        fimg = self.kit["floor"][0][0]
+        for dxl in (-0.75, 0.0, 0.8):  # floor tom legs
+            bx = fx + dxl * fimg.shape[1] / 2
+            props.pole(frame, (bx, fy + 150 * s), (bx + dxl * 40 * s, min(H + 20, self.floor_y)), max(3, int(6 * s / 0.72)))
+        for tw, ax in (("tom_mid", -55), ("tom_hi", 55)):  # tom arms out of the bass drum
             tx, ty = self.kit[tw][1]
-            props.tom_mount(frame, (kx + ax * s, ky - 300 * s), (tx, ty + 80 * s), max(4, int(9 * s / 0.72)))
-        for what in ("floor", "tom_hi", "tom_mid", "kick", "snare"):  # back to front
+            props.tom_mount(frame, (kx + ax * s, ky - 300 * s), (tx, ty + 75 * s), max(4, int(9 * s / 0.72)))
+        for sgn in (-1, 1):  # spurs on the bass drum
+            props.pole(frame, (kx + sgn * 280 * s, ky + 120 * s), (kx + sgn * 380 * s, min(H + 20, ky + 330 * s)), max(3, int(7 * s / 0.72)))
+        for what in ("floor", "tom_mid", "tom_hi", "snare", "kick"):  # back to front (the snare sits behind the bass drum)
             img, anc = self.kit[what][0]
             x, y = self.kit[what][1]
-            key = {"tom_hi": "tom_hi", "tom_mid": "tom_mid", "floor": "floor", "snare": "snare", "kick": "kick"}[what]
-            hit, _ = decay_since(t, self.times[key], 0.1)
-            sc = 1.0 + 0.025 * hit
+            hit, _ = decay_since(t, self.times[what], 0.1)
+            sc = 1.0 + 0.02 * hit
             anchor = anc.get("head", anc.get("center"))
-            blit(frame, img, place(img, anchor, (x, y + 3 * hit), 0.0, sc))
+            blit(frame, img, place(img, anchor, (x, y + 2 * hit), math.radians(self.tilt_deg[what]), sc))
         for side in ("l", "r"):
             S, E, Wr, yaw, s_hand, loose = poses[side]
             img, xy, frac = self.hands[side].render(yaw, s_hand, loose, Wr, self.hand_anchor)
@@ -582,6 +512,8 @@ class Guitarist:
             a = img.copy()
             J = CORI_ARM_L_J if side == "l" else CORI_ARM_R_J
             d = np.hypot(self.p.X - J["shoulder"][0] * s, self.p.Y - J["shoulder"][1] * s) / s
+            if side == "r":  # fretting arm: only the forearm moves (about the painted elbow)
+                m = m * np.clip((self.p.Y / s - (J["elbow"][1] - 15)) / 20, 0, 1)
             a[..., 3] *= m * np.clip((d - 40) / 70, 0, 1)  # the shoulder end fades into the coat
             arms[side] = a
             hole |= (m > 0.05).astype(np.uint8)
@@ -605,7 +537,7 @@ class Guitarist:
         st = handrig.Style(skin=np.array(skin) / 255, ink=(0.14, 0.11, 0.11), ink_w=0.017, shade=0.5)
         self.strum_hand = handrig.Hand(st, mirror=False)
         self.fret_hand = handrig.Hand(st, mirror=True)
-        self.hsize = 190 * s
+        self.hsize = 160 * s
         self.strum_wrist = np.array([458, 1188]) * s
         self.strum_elbow = np.array([540, 1000]) * s
         self.g, self.ga = props.guitar(440 * s)
@@ -625,7 +557,7 @@ class Guitarist:
         self.fret = Spring(0.0, omega=14.0, zeta=0.8)
         self.prev_turn = 0.0
         acc = [(g["t"], 0.9) for g in SONG["guitar"] if g["accent"] and (g["t"] % BAR) < 0.08]
-        self.motion = HeadMotion(3, acc, turn_amp=0.5, tilt_amp=4.5, nod_px=10 * scale)
+        self.motion = HeadMotion(3, acc, SONG["duration"], SPB, turn_amp=0.4, tilt_amp=3.0, nod_px=6 * scale)
 
     def fret_geometry(self, t, fpos, org):
         """Where the fretting hand goes: back of the hand to the audience, fingers up and curled into
@@ -645,11 +577,11 @@ class Guitarist:
         T = Rf @ np.diag([-1.0, 1, 1])
         off = ((T @ np.zeros(3)) - (T @ neck_c))[:2] * self.hsize
         L = self.limbs["r"]
-        S = org + L.S0 + np.array([0.0, 0.0])
-        reach = 0.96 * (L.L1 + L.L2)
-        frac = 0.40 - 0.10 * fpos
-        while frac > 0.05 and np.hypot(*(nk0 + (nk1 - nk0) * frac + off - S)) > reach:
-            frac -= 0.02  # slide toward the body until her arm reaches
+        E = org + L.E0
+        # the chord's place on the neck, where her forearm has its drawn length (no stretching)
+        fr = np.linspace(0.05, 0.8, 76)
+        dist = np.array([np.hypot(*(nk0 + (nk1 - nk0) * f + off - E)) for f in fr])
+        frac = float(fr[np.argmin(np.abs(dist - 1.05 * L.L2))]) - 0.08 * fpos
         at = nk0 + (nk1 - nk0) * frac
         return dict(pose=pose, R=Rf, at=at, neck_c=neck_c, held=held, wrist=at + off - org)
 
@@ -730,11 +662,14 @@ class Guitarist:
         org = np.array([self.x0, top])
         f_ = self.fret_geometry(t, fpos, org)
         pose, Rf, fret_at, neck_c, held = f_["pose"], f_["R"], f_["at"], f_["neck_c"], f_["held"]
-        # fretting arm: IK from her painted shoulder to the hand's wrist, then the hand on the neck
+        # fretting arm: the painted upper arm stays; the forearm turns about the elbow to the hand's
+        # wrist and stretches a little if needed
         L = self.limbs["r"]
-        S = org + L.S0
-        E, Wr = L.solve(S, org + f_["wrist"], 1.0)
-        lay, (x, y) = L.render(S, E, Wr, 1.0, (W, H))
+        E = org + L.E0
+        Wr = org + f_["wrist"]
+        L.fore_k = float(np.clip(np.hypot(*(Wr - E)) / L.L2, 0.7, 1.5))
+        S = E - (L.E0 - L.S0)
+        lay, (x, y) = L.render(S, E, Wr, 1.0, (W, H), part="fore")
         if lay is not None:
             warp.over(frame, lay, x, y)
         img, xy, frac = self.fret_hand.render(pose, Rf, self.hsize, fret_at, anchor=neck_c, held=held)
@@ -856,8 +791,8 @@ def crowd(frame, t, n=13, h=240, seed=4):
 
 # shot list: (start, end, shot); a cut on every bar line (a bar = 2 s at 120 bpm)
 SHOTS = [(0, 2, "guitarist"), (2, 4, "wide"), (4, 6, "drummer"), (6, 8, "guitarist"), (8, 10, "wide"),
-         (10, 14, "singer"), (14, 16, "singer_close"), (16, 18, "guitarist"), (18, 20, "singer"), (20, 22, "wide"),
-         (22, 24, "guitarist"), (24, 26, "drummer"), (26, 30, "singer"), (30, 32, "guitarist"), (32, 34, "drummer"),
+         (10, 14, "singer"), (14, 16, "singer_close"), (16, 18, "guitarist"), (18, 20, "singer_full"), (20, 22, "wide"),
+         (22, 24, "guitarist"), (24, 26, "drummer"), (26, 28, "singer"), (28, 30, "singer_full"), (30, 32, "guitarist"), (32, 34, "drummer"),
          (34, 38, "singer_close"), (38, 40, "wide"), (40, 42, "drummer"), (42, 44, "wide")]
 
 
@@ -871,6 +806,7 @@ class Video:
             self.cast[key] = {
                 "singer": lambda: Singer(),
                 "singer_close": lambda: Singer(scale=0.62, top=-10),
+                "singer_full": lambda: Singer(scale=0.245, top=40),
                 "drummer": lambda: Drummer(),
                 "guitarist": lambda: Guitarist(),
                 "w_drummer": lambda: Drummer(scale=0.40, top=150),

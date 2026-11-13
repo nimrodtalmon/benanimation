@@ -166,12 +166,77 @@ def forearm_hand():
     return img, dict(elbow=E, wrist=(165, fy - 8))  # the hand is a rigged hand (puppet/hand.py)
 
 
-EXT = 450  # rows added below the page edge
+EXT = 2320  # rows added below the page edge: the rest of the jacket, belt, jeans, shoes
+HEM, BELT, CROTCH, ANKLE, SOLE = 2250, 2120, 2480, 3700, 3890  # y in page coordinates
+SHIRT = (340, 790)  # x range of the shirt between the open jacket panels
+
+
+def denim(h, w, seed=0):
+    """Blue jeans in marker style: a mid blue, lighter passes down the thighs, twill grain."""
+    rng = np.random.default_rng(seed)
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    base = np.array([150, 98, 52], np.float32) / 255  # BGR
+    n = cv2.GaussianBlur(rng.normal(0, 1, (h, w)).astype(np.float32), (0, 0), 1.2)
+    streak = cv2.GaussianBlur(rng.normal(0, 1, (h, w)).astype(np.float32), (0, 0), sigmaX=3, sigmaY=40)
+    twill = np.sin((xx + yy) * 0.9) * 0.5 + 0.5
+    k = 1 + 0.05 * n + 0.10 * streak + 0.05 * twill
+    return np.clip(base[None, None] * k[..., None], 0, 1)
+
+
+def legs(big, X, Y0):
+    """Jeans, belt and shoes, drawn into big (BGRA) with page-to-canvas offsets X() and Y0."""
+    H, Wb = big.shape[:2]
+    cx = X(575)
+    Y = lambda y: y + Y0  # noqa: E731
+    jeans = np.zeros_like(big)
+    dn = denim(H, Wb, 5)
+    hip = [(cx - 400, Y(BELT)), (cx + 400, Y(BELT)), (cx + 405, Y(CROTCH)), (cx - 405, Y(CROTCH))]
+    fill(jeans, np.array(hip, float), dn, 31)
+    for sg in (-1, 1):
+        leg = [(cx + sg * 405, Y(BELT + 100)), (cx + sg * 395, Y(CROTCH)), (cx + sg * 362, Y(3080)), (cx + sg * 345, Y(ANKLE)),
+               (cx + sg * 120, Y(ANKLE)), (cx + sg * 112, Y(3080)), (cx + sg * 30, Y(CROTCH + 70)), (cx, Y(CROTCH))]
+        fill(jeans, np.array(leg, float), dn, 32 + sg)
+        fade = np.zeros((H, Wb), np.float32)  # worn, lighter front of the thigh and shin (soft)
+        cv2.line(fade, (int(cx + sg * 250), int(Y(CROTCH + 120))), (int(cx + sg * 238), int(Y(ANKLE - 150))), 1.0, 90)
+        fade = cv2.GaussianBlur(fade, (0, 0), 45)[..., None]
+        jeans[..., :3] = jeans[..., :3] * (1 - 0.35 * fade) + np.array(SHEEN_DENIM, np.float32) / 255 * 0.35 * fade
+        stroke(jeans, [(cx + sg * 385, Y(CROTCH)), (cx + sg * 350, Y(3080)), (cx + sg * 335, Y(ANKLE))], 4, seed=41 + sg, color=(70, 150, 200))  # outer seam
+        stroke(jeans, np.array(leg[1:7], float), 12, seed=42 + sg)  # outline down the leg
+        for k, yk in enumerate((3020, 3065, 3115)):  # knee folds
+            stroke(jeans, [(cx + sg * (300 - 20 * k), Y(yk)), (cx + sg * 230, Y(yk + 18)), (cx + sg * (160 + 10 * k), Y(yk + 6))], 6, seed=50 + k + sg, color=(70, 40, 20))
+        for k, yk in enumerate((ANKLE - 90, ANKLE - 45)):  # stacking at the ankle
+            stroke(jeans, [(cx + sg * 335, Y(yk)), (cx + sg * 230, Y(yk + 14)), (cx + sg * 130, Y(yk))], 6, seed=60 + k + sg, color=(70, 40, 20))
+        stroke(jeans, [(cx + sg * 30, Y(CROTCH + 60)), (cx + sg * 90, Y(CROTCH + 25)), (cx + sg * 200, Y(CROTCH + 5))], 5, seed=70 + sg, color=(70, 40, 20))  # whiskers
+        # shoe: black sneaker, white sole, toe turned a little outward
+        ax = cx + sg * 232
+        shoe = [(ax - 135, Y(ANKLE - 10)), (ax + 135, Y(ANKLE - 10)), (ax + 150 + sg * 30, Y(SOLE - 70)), (ax + 120 + sg * 45, Y(SOLE - 10)),
+                (ax - 120 + sg * 45, Y(SOLE - 10)), (ax - 150 + sg * 30, Y(SOLE - 70))]
+        fill(jeans, np.array(shoe, float), np.full((H, Wb, 3), 0.09, np.float32), 80 + sg)
+        sole = [(ax - 160 + sg * 32, Y(SOLE - 60)), (ax + 162 + sg * 32, Y(SOLE - 60)), (ax + 150 + sg * 45, Y(SOLE)), (ax - 140 + sg * 45, Y(SOLE))]
+        fill(jeans, np.array(sole, float), np.full((H, Wb, 3), 0.92, np.float32), 82 + sg)
+        stroke(jeans, np.array(shoe, float), 12, closed=True, seed=84 + sg)
+        stroke(jeans, np.array(sole, float), 10, closed=True, seed=86 + sg)
+        for k in range(3):  # laces
+            yk = ANKLE + 20 + 35 * k
+            stroke(jeans, [(ax - 50 + sg * 10, Y(yk)), (ax + 50 + sg * 10, Y(yk + 12))], 7, seed=88 + k, color=(230, 230, 230))
+        stroke(jeans, [(ax - 135, Y(ANKLE - 10)), (ax + 135, Y(ANKLE - 10))], 12, seed=90 + sg)  # hem over the shoe
+    # belt with a buckle, visible between the jacket panels
+    belt = [(cx - 405, Y(BELT - 10)), (cx + 405, Y(BELT - 10)), (cx + 405, Y(BELT + 55)), (cx - 405, Y(BELT + 55))]
+    fill(jeans, np.array(belt, float), np.full((H, Wb, 3), 0.07, np.float32) + np.array([0.0, 0.04, 0.10], np.float32), 92)
+    stroke(jeans, np.array(belt, float), 9, closed=True, seed=93)
+    buck = [(cx - 50, Y(BELT - 18)), (cx + 50, Y(BELT - 18)), (cx + 50, Y(BELT + 63)), (cx - 50, Y(BELT + 63))]
+    fill(jeans, np.array(buck, float), np.full((H, Wb, 3), 0.75, np.float32), 94)
+    stroke(jeans, np.array(buck, float), 9, closed=True, seed=95)
+    stroke(jeans, [(cx - 25, Y(BELT + 22)), (cx + 25, Y(BELT + 22))], 7, seed=96)
+    return jeans
+
+
+SHEEN_DENIM = (205, 150, 95)
 
 
 def body():
-    """Pad the drawing, continue the shoulders and jacket sides past the page edge, and
-    continue the jacket below the page bottom (letters on the shirt fade into the black)."""
+    """Pad the drawing; continue the shoulders and jacket past the page edge down to its hem; the
+    shirt down to the belt; then jeans and shoes (code stand-ins in a marker style)."""
     im = cv2.imread(SRC, cv2.IMREAD_UNCHANGED).astype(np.float32) / 255
     h, w = im.shape[:2]
     # the paper edge: let the drawing fade out over the last pixels so the continuation blends in
@@ -183,31 +248,51 @@ def body():
     k = np.clip((np.arange(h, dtype=np.float32) - (h - 130)) / 90, 0, 1)[:, None] * red
     im[..., :3] = im[..., :3] * (1 - k[..., None]) + np.array([0.06, 0.06, 0.07], np.float32) * k[..., None]
     H = h + EXT
-    big = np.zeros((H, w + 2 * PAD, 4), np.float32)
+    Wb = w + 2 * PAD
+    X = lambda x: x + PAD  # noqa: E731
+    big = np.zeros((H, Wb, 4), np.float32)
     big[:h, PAD:PAD + w] = im
     # below the page: each column continues with the median color of its last rows (smoothed
-    # sideways, so no streaks), blended in over the page edge, with jacket grain on top
+    # sideways, so no streaks), with jacket grain; the shirt columns stop at the belt, the
+    # jacket columns at the hem
     col = np.median(im[h - 60:h], axis=0)
     col[..., :3] = cv2.GaussianBlur(col[None, :, :3], (0, 0), sigmaX=9, sigmaY=0)[0]
-    noise = tex("jacket", EXT + 40, w, (128, 128, 128), 7) - 0.5
-    blk = np.repeat(col[None], EXT + 40, 0)
+    n_rows = HEM - h + 40
+    noise = tex("jacket", n_rows, w, (128, 128, 128), 7) - 0.5
+    blk = np.repeat(col[None], n_rows, 0)
     blk[..., :3] += noise * 0.5 * blk[..., 3:4]
+    xs = np.arange(w)
+    shirt = (xs >= SHIRT[0]) & (xs < SHIRT[1])
+    rows = np.arange(h - 40, HEM)[:, None]
+    blk[..., 3] *= np.where(shirt[None, :], rows < BELT, 1.0)
     k = np.clip(np.arange(40, dtype=np.float32) / 40, 0, 1)[:, None, None]
     big[h - 40:h, PAD:PAD + w] = big[h - 40:h, PAD:PAD + w] * (1 - k) + blk[:40] * k
-    big[h:, PAD:PAD + w] = blk[40:]
+    big[h:HEM, PAD:PAD + w] = blk[40:]
     ext = np.zeros_like(big)
-    X = lambda x: x + PAD  # noqa: E731
-    # sides: shoulder slope continues from the page edge, then the jacket side goes down
-    left = [(X(4), 1300), (X(-60), 1350), (X(-150), 1400), (X(-175), 1480), (X(-182), 1700), (X(-178), H), (X(4), H)]
-    right = [(X(w - 4), 1282), (X(w + 60), 1318), (X(w + 150), 1372), (X(w + 178), 1460), (X(w + 184), 1700), (X(w + 180), H), (X(w - 4), H)]
-    for poly, seed, xs in ((left, 20, slice(4, 40)), (right, 21, slice(w - 40, w - 4))):
-        edge = np.median(im[1350:1590, xs, :3].reshape(-1, 3), axis=0) * 255
-        fill(ext, np.array(poly, float), tex("jacket", H, w + 2 * PAD, edge, seed), seed)
+    # sides: shoulder slope continues from the page edge, then the jacket side goes down to the hem
+    left = [(X(4), 1300), (X(-60), 1350), (X(-150), 1400), (X(-175), 1480), (X(-182), 1700), (X(-150), HEM + 20), (X(4), HEM)]
+    right = [(X(w - 4), 1282), (X(w + 60), 1318), (X(w + 150), 1372), (X(w + 178), 1460), (X(w + 184), 1700), (X(w + 152), HEM + 20), (X(w - 4), HEM)]
+    for poly, seed, xs_ in ((left, 20, slice(4, 40)), (right, 21, slice(w - 40, w - 4))):
+        edge = np.median(im[1350:1590, xs_, :3].reshape(-1, 3), axis=0) * 255
+        fill(ext, np.array(poly, float), tex("jacket", H, Wb, edge, seed), seed)
         stroke(ext, np.array(poly[:6], float), 12, seed=seed + 10)
+    jeans = legs(big, X, 0)
     a = big[..., 3:4]
-    out = ext.copy()
-    out[..., :3] = ext[..., :3] * (1 - a) + big[..., :3] * a
-    out[..., 3:4] = ext[..., 3:4] * (1 - a) + a
+    out = jeans.copy()
+    for layer in (ext, big):  # jeans, then the jacket sides, then the continued drawing
+        a = layer[..., 3:4]
+        out[..., :3] = out[..., :3] * (1 - a) + layer[..., :3] * a
+        out[..., 3:4] = out[..., 3:4] * (1 - a) + a
+    # the jacket's hem, its open front edges, and the hem line of the panels
+    stroke(out, [(X(-150), HEM + 20), (X(SHIRT[0] - 5), HEM)], 12, seed=97)
+    stroke(out, [(X(SHIRT[1] + 5), HEM), (X(w + 152), HEM + 20)], 12, seed=98)
+    stroke(out, [(X(SHIRT[0] - 4), h - 200), (X(SHIRT[0] - 6), HEM)], 10, seed=99)
+    stroke(out, [(X(SHIRT[1] + 4), h - 200), (X(SHIRT[1] + 6), HEM)], 10, seed=100)
+    stroke(out, [(X(SHIRT[0] - 30), h + 50), (X(SHIRT[0] - 36), HEM - 40)], 12, seed=101, color=SHEEN)
+    stroke(out, [(X(SHIRT[1] + 30), h + 50), (X(SHIRT[1] + 36), HEM - 40)], 12, seed=102, color=SHEEN)
+    for k, y in enumerate((h + 250, h + 520)):  # buttons down the jacket front, like on his page
+        paste(out, button_sprite(), X(SHIRT[0] - 70), y)
+        paste(out, button_sprite(), X(SHIRT[1] + 70), y)
     return np.clip(out, 0, 1)
 
 

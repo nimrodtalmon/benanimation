@@ -35,9 +35,12 @@ CHARS = {
     "distor": dict(
         full="public/chars/distor-front-v2.png", src_h=1600, height=1350, top=-60, mouths="public/parts/distor",
         head_ells=[(530, 450, 340, 270), (535, 735, 400, 300)], neck=(380, 700, 1010, 1130),
-        face=(535, 735, 255, 300), pivot=(520, 1000), mouth=(565, 878, 112, 110), chin=1015,
+        face=(535, 735, 255, 300), pivot=(520, 1000), mouth=(565, 872, 112, 62), chin=1015,
         eyes=[(420, 556, 118, 58), (737, 578, 120, 74)], lid_from=150, lash=(20, 18, 19), lash_w=16,
-        lid_color=(745, 735), hair_from=700, turn_px=18, bg="stage", credit="Drawing: Ben"),
+        lid_color=(745, 735), hair_from=700, turn_px=18, bg="stage", credit="Drawing: Ben",
+        irises=[(420, 532, 30), (738, 556, 33)], iris_color=(60, 150, 70),
+        closed_eye="public/parts/distor/eye_closed.png",
+        eye_hide=[(418, 556, 114, 56), (735, 576, 120, 64)], closed_flip=[True, False]),
 }
 
 
@@ -85,6 +88,8 @@ class Puppet:
         s = cfg["height"] / cfg["src_h"]
         self.s = s
         self.head = load(cfg["full"], s)
+        if cfg.get("crop_h_src"):  # drop what is below the frame (faster warps for close shots)
+            self.head = self.head[:int(cfg["crop_h_src"] * s)].copy()
         h, w = self.head.shape[:2]
         self.X, self.Y = np.meshgrid(np.arange(w, dtype=np.float32), np.arange(h, dtype=np.float32))
         S = lambda v: v * s  # noqa: E731
@@ -117,6 +122,11 @@ class Puppet:
         wn = band * np.clip((ny1 - Y) / (ny1 - ny0), 0, 1) * (Y > ny0 - 0.3 * (ny1 - ny0))
         w = np.maximum(wh, wn)
         self.w_bend = (w * w * (3 - 2 * w)).astype(np.float32)
+        if cfg.get("irises"):
+            self.paint_irises(cfg["irises"], cfg.get("iris_color", (60, 150, 70)))
+        self.closed = None
+        if cfg.get("closed_eye"):
+            self.closed = cv2.imread(f"{ROOT}/{cfg['closed_eye']}", cv2.IMREAD_UNCHANGED).astype(np.float32) / 255
         self.sprites = None
         if cfg.get("mouths"):  # drawn mouth poses (Ben's sheet) instead of a painted interior
             info = json.load(open(f"{ROOT}/{cfg['mouths']}/mouths.json"))
@@ -140,30 +150,51 @@ class Puppet:
             self.blink(img, blink, turn)
         return img
 
+    def paint_irises(self, irises, color):
+        """Marker-style irises painted into the eye whites (clipped to the white, so the lids and
+        ink rims stay on top): a darker rim, streaks, a pupil and a highlight."""
+        img, s = self.head, self.s
+        h, w = img.shape[:2]
+        white = (img[..., :3].min(2) > 0.72) & (img[..., 3] > 0.5)
+        white = cv2.erode(white.astype(np.uint8), np.ones((2, 2), np.uint8)).astype(np.float32)
+        col = np.array(color, np.float32) / 255
+        for (x, y, r) in irises:
+            x, y, r = x * s, y * s, r * s
+            m = np.zeros((h, w), np.float32)
+            cv2.circle(m, (int(x * 4), int(y * 4)), int(r * 4), 1.0, -1, cv2.LINE_AA, shift=2)
+            m *= white
+            yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+            d = np.hypot(xx - x, yy - y) / max(r, 1)
+            ang = np.arctan2(yy - y, xx - x)
+            tone = 0.75 + 0.35 * (1 - d) + 0.08 * np.sin(ang * 13)
+            c = col[None, None] * tone[..., None]
+            c = np.where((d > 0.82)[..., None], col * 0.45, c)  # dark rim
+            c = np.where((d < 0.42)[..., None], np.array([0.06, 0.06, 0.07], np.float32), c)  # pupil
+            hl = np.hypot(xx - (x - 0.35 * r), yy - (y - 0.30 * r)) < 0.2 * r
+            c = np.where(hl[..., None], np.array([0.97, 0.97, 0.97], np.float32), c)
+            img[..., :3] = img[..., :3] * (1 - m[..., None]) + c * m[..., None]
+
     def mouth_sprite(self, img, mx, my, half, drop):
-        """Paste Ben's drawn mouth: the flat 'wide' pose for small openings, the big 'open' pose
-        for large ones (cross-faded), stretched to the jaw opening."""
+        """Paste Ben's drawn mouth ('main'), its width fixed to the mouth, its height opening with
+        the jaw: the top edge stays at the upper lip, the bottom edge rides on the dropped jaw."""
+        spr, inf = self.sprites["main"]
+        iw, ih = inf["right"] - inf["left"], inf["bottom"] - inf["top"]
+        sx = 2 * half * 1.35 / iw
         J = self.mouth[3]
-        k = np.clip((drop / J - 0.45) / 0.25, 0, 1)
-        top, bot = my - 0.18 * drop - 2 * self.s, my + drop
-        for name, wgt in (("wide", 1 - k), ("open", k)):
-            if wgt < 0.02:
-                continue
-            spr, inf = self.sprites[name]
-            iw, ih = inf["right"] - inf["left"], inf["bottom"] - inf["top"]
-            sx = 2 * half * 1.4 / iw
-            sy = np.clip((bot - top) / ih, 0.35 * sx, 1.25 * sx)
-            M = np.float32([[sx, 0, mx - (inf["left"] + iw / 2) * sx], [0, sy, (top + bot) / 2 - (inf["top"] + ih / 2) * sy]])
-            h, w = img.shape[:2]
-            x0 = int(max(0, mx - half * 1.6))
-            x1 = int(min(w, mx + half * 1.6))
-            y0 = int(max(0, top - ih * sy))
-            y1 = int(min(h, bot + ih * sy))
-            M[:, 2] -= [x0, y0]
-            lay = cv2.warpAffine(spr, M, (x1 - x0, y1 - y0), flags=cv2.INTER_AREA if sx < 1 else cv2.INTER_LINEAR, borderValue=0)
-            a = lay[..., 3:4] * wgt
-            reg = img[y0:y1, x0:x1]
-            reg[..., :3] = reg[..., :3] * (1 - a) + lay[..., :3] * a
+        open_k = np.clip(drop / J, 0, 1)
+        sy = sx * (0.30 + 0.80 * open_k)  # from a slit to a little taller than drawn
+        top = my - 0.18 * ih * sy
+        M = np.float32([[sx, 0, mx - (inf["left"] + iw / 2) * sx], [0, sy, top - inf["top"] * sy]])
+        h, w = img.shape[:2]
+        x0, x1 = int(max(0, mx - half * 2.2)), int(min(w, mx + half * 2.2))
+        y0, y1 = int(max(0, top - 30 * self.s)), int(min(h, top + (ih + 60) * sy + 10))
+        if x1 <= x0 or y1 <= y0:
+            return
+        M[:, 2] -= [x0, y0]
+        lay = cv2.warpAffine(spr, M, (x1 - x0, y1 - y0), flags=cv2.INTER_AREA if sx < 1 else cv2.INTER_LINEAR, borderValue=0)
+        a = lay[..., 3:4] * float(np.clip(drop / (0.12 * J), 0, 1))  # fade in from closed
+        reg = img[y0:y1, x0:x1]
+        reg[..., :3] = reg[..., :3] * (1 - a) + lay[..., :3] * a
 
     def mouth_interior(self, img, mx, my, half, drop):
         xs = np.linspace(-1, 1, 40)
@@ -191,6 +222,8 @@ class Puppet:
         img[..., :3] = img[..., :3] * (1 - a) + col * a
 
     def blink(self, img, b, turn):
+        if self.closed is not None and b > 0.45:
+            return self.blink_drawn(img, min(1.0, (b - 0.45) / 0.1), turn)
         h, w = img.shape[:2]
         src = np.zeros_like(img)
         if "lid_color" in self.c:  # flat marker drawings: plain skin color, slightly textured
@@ -217,6 +250,43 @@ class Puppet:
             lash = cv2.GaussianBlur(lash, (0, 0), 1.2)
             lc = np.array(self.c["lash"][::-1], np.float32) / 255
             img[..., :3] = img[..., :3] * (1 - lash[..., None]) + lc * lash[..., None]
+
+
+def _blink_drawn(self, img, k, turn):
+    """Closed eyes as Ben drew them: cover the eye (whites, iris, rims; not hair) with skin, then
+    paste his closed-eye strokes, mirrored for the other eye. k fades it in."""
+    h, w = img.shape[:2]
+    s = self.s
+    cx, cy = (int(v * s) for v in self.c["lid_color"])
+    skin = np.median(self.head[cy - 8:cy + 8, cx - 8:cx + 8, :3].reshape(-1, 3), axis=0)
+    hair = (img[..., 2] - img[..., 0] > 0.16) & (img[..., 2] < 0.78) & (img[..., 1] < 0.62)
+    for (ex, ey, erx, ery), flip in zip(self.c["eye_hide"], self.c["closed_flip"]):
+        ex = ex * s + turn * self.c["turn_px"] * s * 2 * 0.9
+        ey, erx, ery = ey * s, erx * s, ery * s
+        m = np.zeros((h, w), np.float32)
+        cv2.ellipse(m, (int(ex), int(ey)), (int(erx), int(ery)), 0, 0, 360, 1.0, -1, cv2.LINE_AA)
+        m = np.clip(cv2.GaussianBlur(m, (0, 0), 4) * 1.6, 0, 1) * (~hair) * k
+        if not hasattr(self, "lid_tex"):
+            self.lid_tex = cv2.GaussianBlur(np.random.default_rng(3).normal(0, 0.02, (h, w)).astype(np.float32), (0, 0), 1.5)[..., None]
+        img[..., :3] = img[..., :3] * (1 - m[..., None]) + (skin + self.lid_tex) * m[..., None]
+        spr = self.closed[:, ::-1] if flip else self.closed
+        sw = 2 * erx * 1.02
+        sc = sw / spr.shape[1]
+        sh_ = spr.shape[0] * sc
+        M = np.float32([[sc, 0, ex - sw / 2], [0, sc, ey - ery * 0.85]])
+        x0, y0 = int(max(0, ex - sw / 2 - 2)), int(max(0, ey - ery * 0.85 - 2))
+        x1, y1 = int(min(w, ex + sw / 2 + 2)), int(min(h, ey - ery * 0.85 + sh_ + 2))
+        if x1 <= x0 or y1 <= y0:
+            continue
+        M[:, 2] -= [x0, y0]
+        lay = cv2.warpAffine(spr, M, (x1 - x0, y1 - y0), flags=cv2.INTER_AREA, borderValue=0)
+        lay[..., 3] = np.clip(cv2.dilate(lay[..., 3], np.ones((3, 3), np.uint8)) * 1.6, 0, 1)  # match his line weight
+        a = lay[..., 3:4] * k
+        reg = img[y0:y1, x0:x1]
+        reg[..., :3] = reg[..., :3] * (1 - a) + lay[..., :3] * a
+
+
+Puppet.blink_drawn = _blink_drawn
 
 
 def over(dst, src, x, y):

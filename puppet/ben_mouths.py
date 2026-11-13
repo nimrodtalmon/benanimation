@@ -12,12 +12,18 @@ import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = f"{ROOT}/public/parts/distor"
-# crop boxes on the sheet (x0, y0, x1, y1)
+# crop boxes on the sheet (x0, y0, x1, y1); "main" is Ben's preferred mouth (his own crop)
 MOUTHS = dict(
+    main=(0, 0, 577, 279),
     wide=(470, 470, 1060, 750),   # flat, teeth clenched / slightly open
     open=(670, 980, 1240, 1330),  # wide open, big teeth
 )
 # the inside of each mouth outline, traced by hand on the sheet (the photo's outline has gaps)
+OUTER = dict(  # the outer edge of the ink outline (used as is)
+    main=[(38, 80), (94, 70), (188, 74), (281, 90), (375, 108), (438, 120), (488, 132), (512, 148), (531, 200), (525, 222),
+          (488, 228), (406, 228), (312, 216), (219, 197), (138, 166), (75, 125), (44, 94)],
+)
+SOURCE = dict(main="drawings/ben/mouth-wide-v2.png")
 INSIDE = dict(
     wide=[(497, 537), (560, 530), (650, 527), (750, 533), (850, 553), (930, 578), (990, 607), (1018, 640), (1025, 668), (1012, 690),
           (950, 698), (850, 688), (750, 668), (670, 640), (600, 605), (540, 568)],
@@ -36,20 +42,27 @@ def flatten(img):
 
 
 def cut(name, box):  # noqa: C901
-    sheet = cv2.imread(f"{ROOT}/drawings/ben/mouths-sheet.jpg")
+    sheet = cv2.imread(f"{ROOT}/{SOURCE.get(name, 'drawings/ben/mouths-sheet.jpg')}")
     x0, y0, x1, y1 = box
     c = flatten(sheet[y0:y1, x0:x1])
     gray = cv2.cvtColor(c, cv2.COLOR_BGR2GRAY)
     poly = np.zeros(gray.shape, np.uint8)
-    cv2.fillPoly(poly, [np.array(INSIDE[name], np.int32) - [x0, y0]], 1)
+    cv2.fillPoly(poly, [np.array(OUTER.get(name, INSIDE.get(name)), np.int32) - [x0, y0]], 1)
     # shrink the hand-traced shape well inside, then grow it out to the ink outline (never across ink)
     light = (gray > 140).astype(np.uint8)
-    body = cv2.erode(poly, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (31, 31)))
+    if name in OUTER:
+        body = poly
+    else:
+        body = cv2.erode(poly, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (31, 31)))
     k3 = np.ones((3, 3), np.uint8)
-    for _ in range(26):
+    for _ in range(0 if name in OUTER else 26):
         body = np.maximum(body, cv2.dilate(body, k3) & light)
     body &= cv2.dilate(poly, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11)))  # no leaks through gaps
     body = np.maximum(body, cv2.dilate(body, k3) & (1 - light))  # plus the ink outline itself
+    if name in OUTER:  # a firm ink rim along the traced outer edge (Ben's line is faint in places)
+        rim = (body - cv2.erode(body, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)))).astype(bool)
+        c[rim & (gray > 90)] = (30, 28, 32)
+        gray = cv2.cvtColor(c, cv2.COLOR_BGR2GRAY)
     # clean the colors: deep blacks neutral, light teeth a touch warmer and even
     cf = c.astype(np.float32)
     lum = cf.mean(2, keepdims=True)

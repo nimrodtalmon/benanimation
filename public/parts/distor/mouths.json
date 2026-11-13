@@ -1,4 +1,13 @@
 {
+ "main": {
+  "file": "mouth_main.png",
+  "w": 521,
+  "h": 186,
+  "left": 4,
+  "right": 511,
+  "top": 33,
+  "bottom": 154
+ },
  "wide": {
   "file": "mouth_wide.png",
   "w": 558,

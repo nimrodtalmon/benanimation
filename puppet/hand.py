@@ -244,6 +244,23 @@ class Hand:
             Hh = Hh / np.linalg.norm(Hh)
             spec = np.clip(nbuf @ Hh.astype(np.float32), 0, 1) ** 24 * gloss
             col = col + spec[..., None]
+        # contact shadows: darker where a nearer part covers the neighborhood (between fingers, under
+        # the thumb, where the hand grips the object) - this is what makes the parts touch
+        zb = np.where(cover, zbuf, -1e9).astype(np.float32)
+        r_ao = max(3, int(0.05 * k)) | 1
+        zmax = cv2.dilate(zb, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (r_ao, r_ao)))
+        ao = np.clip((zmax - zb) / (0.09 * k), 0, 1) * cover
+        ao = cv2.GaussianBlur(ao.astype(np.float32), (0, 0), 0.02 * k)
+        col = col * (1 - (0.22 if st.flat else 0.38) * ao[..., None])
+        # skin grain: soft blotches and a fine marker/paint grain, so it is not a smooth 3D surface
+        if not hasattr(self, "_grain") or self._grain.shape != (h, w):
+            rng = np.random.default_rng(7)
+            g1 = cv2.GaussianBlur(rng.normal(0, 1, (h, w)).astype(np.float32), (0, 0), 0.05 * k)
+            g2 = cv2.GaussianBlur(rng.normal(0, 1, (h, w)).astype(np.float32), (0, 0), sigmaX=0.6, sigmaY=0.012 * k)
+            self._grain = (g1 / (g1.std() + 1e-6)) * 0.045 + (g2 / (g2.std() + 1e-6)) * 0.012
+        skin_px = (gloss < 0.2)[..., None]
+        col = col * (1 + self._grain[..., None] * skin_px)
+        col = col + skin_px * np.clip(1 - diff, 0, 1)[..., None] * np.array([0.0, 0.01, 0.04], np.float32)  # warm in the shade
         nm = cv2.GaussianBlur(nailm, (0, 0), 0.8)[..., None]
         col = col * (1 - 0.8 * nm) + st.nail * 0.8 * nm
         # ink: silhouette, any big depth jump, and where two different fingers meet
