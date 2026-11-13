@@ -33,9 +33,9 @@ CHARS = {
         eyes=[(790, 750, 60, 40), (1012, 748, 58, 40)], lid_from=118, lash=(42, 29, 31), lash_w=8,
         hair_from=820, turn_px=26, bg="pepper", credit='Painting: "Portrait of Pepper" by David Revoy, CC BY 4.0, animated'),
     "distor": dict(
-        full="public/chars/distor-front.png", src_h=1600, height=1350, top=-60,
+        full="public/chars/distor-front-v2.png", src_h=1600, height=1350, top=-60, mouths="public/parts/distor",
         head_ells=[(530, 450, 340, 270), (535, 735, 400, 300)], neck=(380, 700, 1010, 1130),
-        face=(535, 735, 255, 300), pivot=(520, 1000), mouth=(562, 862, 105, 60), chin=1015,
+        face=(535, 735, 255, 300), pivot=(520, 1000), mouth=(565, 878, 112, 110), chin=1015,
         eyes=[(420, 556, 118, 58), (737, 578, 120, 74)], lid_from=150, lash=(20, 18, 19), lash_w=16,
         lid_color=(745, 735), hair_from=700, turn_px=18, bg="stage", credit="Drawing: Ben"),
 }
@@ -117,6 +117,11 @@ class Puppet:
         wn = band * np.clip((ny1 - Y) / (ny1 - ny0), 0, 1) * (Y > ny0 - 0.3 * (ny1 - ny0))
         w = np.maximum(wh, wn)
         self.w_bend = (w * w * (3 - 2 * w)).astype(np.float32)
+        self.sprites = None
+        if cfg.get("mouths"):  # drawn mouth poses (Ben's sheet) instead of a painted interior
+            info = json.load(open(f"{ROOT}/{cfg['mouths']}/mouths.json"))
+            self.sprites = {k: (cv2.imread(f"{ROOT}/{cfg['mouths']}/{v['file']}", cv2.IMREAD_UNCHANGED).astype(np.float32) / 255, v)
+                            for k, v in info.items()}
 
     def head_frame(self, turn, mouth, vowel, blink, sway):
         mx, my, mw, J = self.mouth
@@ -127,11 +132,38 @@ class Puppet:
         dx = dx + (width - 1) * 0.0  # width handled by the interior shape
         img = cv2.remap(self.head, self.X - dx, self.Y - dy, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
         mxt = mx + turn * self.c["turn_px"] * self.s * 2
-        if drop > 1.0:
+        if drop > 1.0 and self.sprites:
+            self.mouth_sprite(img, mxt, my, mw * width * (0.85 + 0.15 * mouth), drop)
+        elif drop > 1.0:
             self.mouth_interior(img, mxt, my, mw * width * (0.75 + 0.25 * mouth), drop)
         if blink > 0.02:
             self.blink(img, blink, turn)
         return img
+
+    def mouth_sprite(self, img, mx, my, half, drop):
+        """Paste Ben's drawn mouth: the flat 'wide' pose for small openings, the big 'open' pose
+        for large ones (cross-faded), stretched to the jaw opening."""
+        J = self.mouth[3]
+        k = np.clip((drop / J - 0.45) / 0.25, 0, 1)
+        top, bot = my - 0.18 * drop - 2 * self.s, my + drop
+        for name, wgt in (("wide", 1 - k), ("open", k)):
+            if wgt < 0.02:
+                continue
+            spr, inf = self.sprites[name]
+            iw, ih = inf["right"] - inf["left"], inf["bottom"] - inf["top"]
+            sx = 2 * half * 1.4 / iw
+            sy = np.clip((bot - top) / ih, 0.35 * sx, 1.25 * sx)
+            M = np.float32([[sx, 0, mx - (inf["left"] + iw / 2) * sx], [0, sy, (top + bot) / 2 - (inf["top"] + ih / 2) * sy]])
+            h, w = img.shape[:2]
+            x0 = int(max(0, mx - half * 1.6))
+            x1 = int(min(w, mx + half * 1.6))
+            y0 = int(max(0, top - ih * sy))
+            y1 = int(min(h, bot + ih * sy))
+            M[:, 2] -= [x0, y0]
+            lay = cv2.warpAffine(spr, M, (x1 - x0, y1 - y0), flags=cv2.INTER_AREA if sx < 1 else cv2.INTER_LINEAR, borderValue=0)
+            a = lay[..., 3:4] * wgt
+            reg = img[y0:y1, x0:x1]
+            reg[..., :3] = reg[..., :3] * (1 - a) + lay[..., :3] * a
 
     def mouth_interior(self, img, mx, my, half, drop):
         xs = np.linspace(-1, 1, 40)

@@ -17,6 +17,7 @@ import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = f"{ROOT}/public/parts/distor"
+SRC = f"{ROOT}/public/chars/distor-front-v2.png"
 INK = np.array([19, 18, 20], np.float32) / 255  # BGR, Ben's marker black
 PAD = 260  # body canvas padding left/right
 
@@ -45,7 +46,7 @@ def wobble(pts, amp, seed):
     return pts + off
 
 
-def stroke(img, pts, width, closed=False, seed=0):
+def stroke(img, pts, width, closed=False, seed=0, color=None):
     """Ink line with slightly varying width, antialiased, drawn into BGRA float img."""
     pts = wobble(pts, 1.2, seed)
     h, w = img.shape[:2]
@@ -57,7 +58,8 @@ def stroke(img, pts, width, closed=False, seed=0):
         ww = width * (0.85 + 0.3 * (0.5 + 0.5 * math.sin(k * 0.21 + seed)))
         cv2.line(m, tuple(a), tuple(b), 1.0, max(1, int(round(ww))), cv2.LINE_AA, shift=3)
     m = cv2.GaussianBlur(m, (0, 0), 0.7)
-    img[..., :3] = img[..., :3] * (1 - m[..., None]) + INK * m[..., None]
+    col = INK if color is None else np.array(color, np.float32) / 255
+    img[..., :3] = img[..., :3] * (1 - m[..., None]) + col * m[..., None]
     img[..., 3] = np.maximum(img[..., 3], m)
 
 
@@ -98,8 +100,8 @@ def arc(c, rx, ry, a0, a1, n=40):
 
 def button_sprite():
     """Copy one gold button (with its ink ring) from Ben's drawing."""
-    im = cv2.imread(f"{ROOT}/public/chars/distor-front.png", cv2.IMREAD_UNCHANGED).astype(np.float32) / 255
-    cx, cy, r = 275, 917, 27
+    im = cv2.imread(SRC, cv2.IMREAD_UNCHANGED).astype(np.float32) / 255
+    cx, cy, r = 280, 915, 24
     patch = im[cy - r:cy + r, cx - r:cx + r].copy()
     yy, xx = np.mgrid[-r:r, -r:r]
     patch[..., 3] *= np.clip((r - 2 - np.hypot(xx, yy)) / 3, 0, 1)
@@ -114,8 +116,9 @@ def paste(img, sprite, cx, cy):
     img[y0:y0 + h, x0:x0 + w, 3:4] = np.maximum(img[y0:y0 + h, x0:x0 + w, 3:4], a)
 
 
-JACKET = (172, 180, 180)  # BGR, sampled near the page edge of his jacket
-TRIM = (205, 190, 182)
+JACKET = (14, 10, 36)  # BGR, Ben's dark maroon jacket
+TRIM = (152, 145, 140)  # the grey band on his collar, used for the cuffs
+SHEEN = (52, 40, 112)  # lighter maroon for folds and the lit edge (black ink would vanish on the jacket)
 SKIN = (167, 199, 225)
 
 
@@ -134,11 +137,11 @@ def upper_arm():
     img = np.zeros((h, w, 4), np.float32)
     out = capsule(S, 128, E, 106, bulge=6)
     m = fill(img, out, tex("jacket", h, w, JACKET, 1), 1)
-    shade(img, m, -1, 0.10)
+    stroke(img, [(70, 250), (62, 450), (75, 650)], 14, seed=5, color=SHEEN)  # lit edge
     stroke(img, out, 12, closed=True, seed=1)
-    stroke(img, arc((165, 205), 120, 55, math.radians(200), math.radians(340)), 9, seed=2)  # shoulder seam
-    stroke(img, [(110, 640), (150, 660), (185, 655)], 8, seed=3)  # folds near the elbow
-    stroke(img, [(200, 690), (235, 700)], 7, seed=4)
+    stroke(img, arc((165, 205), 120, 55, math.radians(200), math.radians(340)), 8, seed=2, color=SHEEN)  # shoulder seam
+    stroke(img, [(110, 640), (150, 660), (185, 655)], 8, seed=3, color=SHEEN)  # folds near the elbow
+    stroke(img, [(200, 690), (235, 700)], 7, seed=4, color=SHEEN)
     return img, dict(shoulder=S, elbow=E)
 
 
@@ -150,7 +153,7 @@ def forearm_hand():
     # sleeve and cuff
     sleeve = capsule(E, 106, (165, fy - 100), 100, bulge=-4)
     m2 = fill(img, sleeve, tex("jacket", h, w, JACKET, 3), 13)
-    shade(img, m2, -1, 0.10)
+    stroke(img, [(78, 200), (72, 330), (80, fy - 110)], 13, seed=6, color=SHEEN)
     stroke(img, sleeve, 12, closed=True, seed=14)
     cuff = np.array([(62, fy - 95), (268, fy - 95), (272, fy + 2), (58, fy + 2)], float)
     cuff = np.concatenate([[(62 + (268 - 62) * t, fy - 95 + 6 * math.sin(math.pi * t)) for t in np.linspace(0, 1, 20)],
@@ -158,8 +161,8 @@ def forearm_hand():
     fill(img, cuff, tex("jacket", h, w, TRIM, 4), 15)
     stroke(img, cuff, 11, closed=True, seed=16)
     paste(img, button_sprite(), 225, fy - 46)
-    stroke(img, [(120, 215), (160, 240)], 7, seed=17)  # sleeve folds near the elbow
-    stroke(img, [(190, 230), (215, 262)], 7, seed=18)
+    stroke(img, [(120, 215), (160, 240)], 7, seed=17, color=SHEEN)  # sleeve folds near the elbow
+    stroke(img, [(190, 230), (215, 262)], 7, seed=18, color=SHEEN)
     return img, dict(elbow=E, wrist=(165, fy - 8))  # the hand is a rigged hand (puppet/hand.py)
 
 
@@ -169,7 +172,7 @@ EXT = 450  # rows added below the page edge
 def body():
     """Pad the drawing, continue the shoulders and jacket sides past the page edge, and
     continue the jacket below the page bottom (letters on the shirt fade into the black)."""
-    im = cv2.imread(f"{ROOT}/public/chars/distor-front.png", cv2.IMREAD_UNCHANGED).astype(np.float32) / 255
+    im = cv2.imread(SRC, cv2.IMREAD_UNCHANGED).astype(np.float32) / 255
     h, w = im.shape[:2]
     # the paper edge: let the drawing fade out over the last pixels so the continuation blends in
     edge = np.clip(np.minimum(np.arange(w), w - 1 - np.arange(w)) / 14.0, 0, 1).astype(np.float32)
@@ -182,11 +185,16 @@ def body():
     H = h + EXT
     big = np.zeros((H, w + 2 * PAD, 4), np.float32)
     big[:h, PAD:PAD + w] = im
-    # below the page: repeat the last rows, with jacket texture so it does not look streaked
-    last = im[h - 8:h].mean(0)
-    noise = tex("jacket", EXT, w, (128, 128, 128), 7) - 0.5
-    big[h:, PAD:PAD + w] = last[None]
-    big[h:, PAD:PAD + w, :3] += noise * 0.6 * big[h:, PAD:PAD + w, 3:4]
+    # below the page: each column continues with the median color of its last rows (smoothed
+    # sideways, so no streaks), blended in over the page edge, with jacket grain on top
+    col = np.median(im[h - 60:h], axis=0)
+    col[..., :3] = cv2.GaussianBlur(col[None, :, :3], (0, 0), sigmaX=9, sigmaY=0)[0]
+    noise = tex("jacket", EXT + 40, w, (128, 128, 128), 7) - 0.5
+    blk = np.repeat(col[None], EXT + 40, 0)
+    blk[..., :3] += noise * 0.5 * blk[..., 3:4]
+    k = np.clip(np.arange(40, dtype=np.float32) / 40, 0, 1)[:, None, None]
+    big[h - 40:h, PAD:PAD + w] = big[h - 40:h, PAD:PAD + w] * (1 - k) + blk[:40] * k
+    big[h:, PAD:PAD + w] = blk[40:]
     ext = np.zeros_like(big)
     X = lambda x: x + PAD  # noqa: E731
     # sides: shoulder slope continues from the page edge, then the jacket side goes down
@@ -203,12 +211,32 @@ def body():
     return np.clip(out, 0, 1)
 
 
+def cut_v2():
+    """Ben's new singer page (dark jacket, light blue paper): remove the paper and the signature,
+    crop so it lines up with the first drawing (same head, 20 px wider page)."""
+    im = cv2.imread(f"{ROOT}/drawings/ben/distor-front-v2.png")
+    paper = np.array([243, 237, 224], np.float32)
+    d = np.sqrt(((im.astype(np.float32) - paper) ** 2).sum(2))
+    bg = (d < 40).astype(np.uint8) * 255
+    mask = np.zeros((im.shape[0] + 2, im.shape[1] + 2), np.uint8)
+    for x in range(0, im.shape[1], 7):
+        if bg[0, x] == 255:
+            cv2.floodFill(bg, mask, (x, 0), 128)
+    fg = (bg != 128).astype(np.uint8)
+    n, lab, st, _ = cv2.connectedComponentsWithStats(fg)
+    fg = (lab == 1 + np.argmax(st[1:, cv2.CC_STAT_AREA])).astype(np.float32)
+    a = cv2.GaussianBlur(fg, (0, 0), 0.7)
+    out = np.dstack([im, (a * 255).astype(np.uint8)])[:, 20:1170]
+    cv2.imwrite(SRC, out)
+
+
 def save(path, img):
     cv2.imwrite(path, np.clip(img * 255 + 0.5, 0, 255).astype(np.uint8))
 
 
 def main():
     os.makedirs(OUT, exist_ok=True)
+    cut_v2()
     ua, ua_j = upper_arm()
     fa, fa_j = forearm_hand()
     save(f"{OUT}/upper_arm.png", ua)

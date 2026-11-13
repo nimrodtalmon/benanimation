@@ -199,6 +199,7 @@ def drum(rx, depth, shell=RED_SHELL, ink=4, lugs=6, tilt=0.30, chrome=False, see
         _line(img, _ellipse_pts(cx, cy, rx - hoop * 0.3, ry - hoop * 0.2), wv, closed=True, color=col)
     _line(img, _ellipse_pts(cx, cy - hoop * 0.25, rx - hoop * 0.3, ry - hoop * 0.2, math.pi * 1.15, math.pi * 1.6, 30), hoop * 0.3, color=(1, 1, 1))
     _line(img, body, ink, closed=False)
+    img = marker(img, math.pi / 2, seed=seed)
     return img, dict(head=(cx, cy), top=(cx, cy))
 
 
@@ -218,6 +219,7 @@ def kick_front(r, skull=None, ink=5):
     _poly(img, _ellipse_pts(c, c, r * 0.88, r * 0.88, n=200), np.clip(headc, 0, 1), ink=0)
     for wv, col in ((10, INK), (6, CHROME[0]), (3, CHROME[1])):
         _line(img, _ellipse_pts(c, c, r * 0.885, r * 0.885, n=200), wv * r / 260, closed=True, color=col)
+    img = marker(img, 0.5, seed=11)
     if skull is not None:
         sk = skull.copy()
         a = cv2.erode(sk[..., 3], np.ones((5, 5), np.uint8))
@@ -269,6 +271,7 @@ def cymbal(rx, tilt=0.22, ink=3):
     _poly(img, _ellipse_pts(cx, cy - ry * 0.9, rx * 0.06, rx * 0.035, n=20), CHROME[1], ink=1.5)  # wing nut
     _line(img, _ellipse_pts(cx, cy, rx, ry, 0.1, math.pi - 0.1, 60), 2.0, color=BRASS[0])  # edge
     _line(img, out, ink, closed=True)
+    img = marker(img, 0.12, seed=int(rx))
     return img, dict(center=(cx, cy))
 
 
@@ -439,3 +442,100 @@ def button(dst, p, r):
     cv2.circle(dst, (int(p[0]), int(p[1])), int(r + 2), INK, -1, cv2.LINE_AA)
     cv2.circle(dst, (int(p[0]), int(p[1])), int(r), (0.85, 0.85, 0.88), -1, cv2.LINE_AA)
     cv2.circle(dst, (int(p[0] - r * 0.3), int(p[1] - r * 0.3)), max(1, int(r * 0.35)), (1, 1, 1), -1, cv2.LINE_AA)
+
+
+def sleeve(dst, a, b, ra, rb, color, fur=(0.86, 0.88, 0.90), ink=3):
+    """A painted-looking forearm sleeve from a (elbow / painted cuff) to b (wrist): tapered,
+    shaded across, ink edge, a fur cuff at the wrist end."""
+    a, b = np.asarray(a, float), np.asarray(b, float)
+    v = b - a
+    L = np.hypot(*v)
+    if L < 1:
+        return
+    u = v / L
+    n = np.array([-u[1], u[0]])
+    R = max(ra, rb) + ink + 6
+    x0, y0 = np.floor(np.minimum(a, b) - R).astype(int)
+    x1, y1 = np.ceil(np.maximum(a, b) + R).astype(int)
+    x0, y0, x1, y1 = max(x0, 0), max(y0, 0), min(x1, dst.shape[1]), min(y1, dst.shape[0])
+    if x1 <= x0 or y1 <= y0:
+        return
+    yy, xx = np.mgrid[y0:y1, x0:x1].astype(np.float32)
+    t = np.clip(((xx - a[0]) * u[0] + (yy - a[1]) * u[1]) / L, 0, 1)
+    r = ra + (rb - ra) * t
+    cx, cy = a[0] + v[0] * t, a[1] + v[1] * t
+    across = ((xx - cx) * n[0] + (yy - cy) * n[1]) / np.maximum(r, 1)
+    dist = np.hypot(xx - cx, yy - cy)
+    m = np.clip(r - dist + 0.5, 0, 1)
+    edge = np.clip(r + ink - dist + 0.5, 0, 1) - m
+    lit = np.clip(0.6 - 0.6 * across, 0, 1)
+    col = np.asarray(color, np.float32) * (0.62 + 0.45 * lit)[..., None]
+    folds = 0.06 * np.sin(t * L / 9.0 + across * 2.0)
+    col = col * (1 + folds)[..., None]
+    # fur cuff: the last part near b, with a ragged edge
+    cuff = (t > 1 - min(0.35, 30 / L)) & (np.sin(across * 9 + t * 40) * 0.04 + t > 1 - min(0.33, 28 / L))
+    col = np.where(cuff[..., None], np.asarray(fur, np.float32) * (0.75 + 0.3 * lit)[..., None], col)
+    reg = dst[y0:y1, x0:x1]
+    reg[:] = reg * (1 - edge[..., None]) + np.asarray(INK, np.float32) * edge[..., None]
+    reg[:] = reg * (1 - m[..., None]) + np.clip(col, 0, 1) * m[..., None]
+
+
+# ---------------------------------------------------------------- marker look (like Ben's drawings)
+def _streaks(h, w, angle, seed, length=40, width=1.6):
+    """Marker-stroke texture: noise smeared along one direction (overlapping marker passes)."""
+    rng = np.random.default_rng(seed)
+    n = cv2.GaussianBlur(rng.normal(0, 1, (h, w)).astype(np.float32), (0, 0), 2.2)
+    L = int(length)
+    k = np.zeros((L, L), np.float32)
+    c = (L - 1) / 2
+    dx, dy = math.cos(angle), math.sin(angle)
+    for t in np.linspace(-c, c, L * 2):
+        x, y = int(round(c + t * dx)), int(round(c + t * dy))
+        if 0 <= x < L and 0 <= y < L:
+            k[y, x] = 1
+    k = cv2.GaussianBlur(k, (0, 0), width * 0.5)
+    k /= k.sum()
+    s = cv2.filter2D(n, -1, k)
+    return s / (s.std() + 1e-6)
+
+
+def marker(img, angle=0.0, seed=0, tones=6, streak=0.07, ink_boost=1.6, hl=True):
+    """Re-render a code-drawn BGRA sprite in a marker style: shading quantized to a few flat tones
+    with soft steps, marker streaks along `angle`, the dark outline thickened and wobbly, and a few
+    white highlight strokes on the light tones (as Ben does on hair and buttons)."""
+    out = img.copy()
+    a = img[..., 3]
+    h, w = a.shape
+    bgr = img[..., :3]
+    lum = bgr.mean(2)
+    ink = (lum < 0.12) & (a > 0.5)
+    # flat tones: quantize lightness, keep hue
+    q = np.floor(lum * tones + 0.5) / tones
+    q = 0.65 * cv2.GaussianBlur(q.astype(np.float32), (0, 0), 1.5) + 0.35 * lum  # soft marker steps
+    ratio = (q + 0.04) / (lum + 0.04)
+    col = np.clip(bgr * ratio[..., None], 0, 1)
+    # marker passes: streaks, stronger in mid tones; the paper shows a bit through light tones
+    st = _streaks(h, w, angle, seed)
+    col = col * (1 + streak * st[..., None] * (0.4 + 0.6 * (1 - np.abs(lum - 0.5) * 2))[..., None])
+    # wobbly, thicker outline: dilate the ink a little with noise
+    wob = cv2.GaussianBlur(np.random.default_rng(seed + 1).normal(0, 1, (h, w)).astype(np.float32), (0, 0), 6)
+    thick = cv2.dilate(ink.astype(np.uint8), np.ones((3, 3), np.uint8)) & (wob > -0.3)
+    edge = cv2.morphologyEx((a > 0.5).astype(np.uint8), cv2.MORPH_GRADIENT, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)))
+    inkm = np.clip(ink.astype(np.float32) + thick * 0.9 + edge * 0.9 * (ink_boost > 1), 0, 1)
+    inkm = cv2.GaussianBlur(inkm, (0, 0), 0.6)
+    col = col * (1 - inkm[..., None]) + np.array(INK, np.float32) * inkm[..., None]
+    if hl:  # white highlight dashes on the brightest tone
+        rng = np.random.default_rng(seed + 2)
+        bright = (q > 0.72) & (a > 0.9) & ~ink
+        ys, xs = np.nonzero(bright)
+        if len(ys):
+            hm = np.zeros((h, w), np.float32)
+            for i in rng.choice(len(ys), size=min(len(ys), max(2, len(ys) // 2500)), replace=False):
+                L = rng.uniform(10, 26)
+                x0, y0 = xs[i], ys[i]
+                cv2.line(hm, (int(x0), int(y0)), (int(x0 + L * math.cos(angle)), int(y0 + L * math.sin(angle))), 1.0, max(1, int(rng.uniform(1.5, 3))), cv2.LINE_AA)
+            hm *= bright
+            col = col * (1 - 0.8 * hm[..., None]) + 0.97 * 0.8 * hm[..., None]
+    out[..., :3] = np.clip(col, 0, 1)
+    out[..., 3] = np.maximum(a, cv2.dilate(a, np.ones((3, 3), np.uint8)) * 0.0)
+    return out

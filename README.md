@@ -16,7 +16,8 @@ Everything in Python + OpenCV (`puppet/`), every move timed to the song (`src/so
   Guitarist (Revoy's Coriander concept art, CC BY 4.0), stage, crowd, shot list.
   - `python3 puppet/band.py singer|drummer|guitarist [start dur]` -> `out/band-<who>.mp4`
   - `python3 puppet/band.py video` -> `out/band-video.mp4` (44 s, cuts on the bar; renders two halves in parallel, ~10 min)
-- `puppet/standins.py`: Distor's stand-in arms and the jacket continued past the paper edge -> `public/parts/distor/`.
+- `puppet/ben_mouths.py`: cuts Ben's mouth poses from his photographed sheet (`drawings/ben/mouths-sheet.jpg`); the singer sings with them.
+- `puppet/standins.py`: Distor's stand-in arms (from Ben's new page `drawings/ben/distor-front-v2.png`) and the jacket continued past the paper edge -> `public/parts/distor/`.
 - `puppet/cutout_paint.py`: cut-outs of the Revoy paintings (sources in `drawings/revoy/`) and Pepper's arms -> `public/parts/pepper/`.
 
 ## Band video (older Remotion version, superseded)

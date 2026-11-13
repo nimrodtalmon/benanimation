@@ -53,8 +53,9 @@ def chain(base, d, n, segs, flex):
 class Pose:
     """Finger curls: dict name -> (mcp, pip, dip) in degrees; thumb -> (cmc, mcp, ip); spread."""
 
-    def __init__(self, curls, thumb=(20, 20, 15), thumb_dir=(0.55, 0.75, -0.35), spread=1.0):
+    def __init__(self, curls, thumb=(20, 20, 15), thumb_dir=(0.55, 0.75, -0.35), spread=1.0, thumb_hidden=False):
         self.curls, self.thumb, self.thumb_dir, self.spread = curls, thumb, thumb_dir, spread
+        self.thumb_hidden = thumb_hidden  # e.g. behind a guitar neck
 
     @staticmethod
     def mix(a, b, t):
@@ -123,8 +124,9 @@ class Hand:
         nt = -bend / np.linalg.norm(bend)
         pts, n = chain(THUMB["base"], td, nt, THUMB["seg"], [math.radians(a) for a in pose.thumb])
         for k in range(3):
-            out.append(dict(id=f"thumb{k}", grp="thumb", seg=k, p0=pts[k], p1=pts[k + 1], r0=THUMB["r"][k], r1=THUMB["r"][k + 1], zs=0.8,
-                            nail_n=n if k == 2 else None))
+            if not getattr(pose, "thumb_hidden", False) or k == 0:
+                out.append(dict(id=f"thumb{k}", grp="thumb", seg=k, p0=pts[k], p1=pts[k + 1], r0=THUMB["r"][k], r1=THUMB["r"][k + 1], zs=0.8,
+                                nail_n=n if k == 2 else None))
         # the thumb's muscle at the base joins it to the palm
         out.append(dict(id="palm", grp="palm", p0=(0.06, 0.10, -0.01), p1=pts[1] * 0.55 + pts[0] * 0.45, r0=0.08, r1=0.058, zs=0.55))
         return out
@@ -256,9 +258,10 @@ class Hand:
         for sh in ((0, 1), (1, 0), (1, 1), (1, -1)):
             zb2 = np.roll(zbuf, sh, (0, 1))
             gb2, sk2, pb2 = np.roll(gb, sh, (0, 1)), np.roll(sk, sh, (0, 1)), np.roll(pb, sh, (0, 1))
+            ib2 = np.roll(ibuf, sh, (0, 1))
             dzz = np.abs(zb2 - zbuf)
             joined = (pb & (sk2 == 0)) | (pb2 & (sk == 0))  # knuckles flow into the back of the hand
-            edge |= (dzz > big) | ((gb != gb2) & ~joined & (dzz > small))
+            edge |= (dzz > big) | ((gb != gb2) & ~joined & (ib2 >= 0) & (ibuf >= 0))
         nail_edge = (cv2.morphologyEx((nailm > 0).astype(np.uint8), cv2.MORPH_GRADIENT, np.ones((3, 3), np.uint8)) > 0)
         ink = max(1, int(round(st.ink_w * k)))
         em = cv2.dilate(edge.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ink, ink))).astype(np.float32)

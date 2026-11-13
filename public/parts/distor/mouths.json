@@ -1,0 +1,20 @@
+{
+ "wide": {
+  "file": "mouth_wide.png",
+  "w": 558,
+  "h": 199,
+  "left": 30,
+  "right": 555,
+  "top": 27,
+  "bottom": 163
+ },
+ "open": {
+  "file": "mouth_open.png",
+  "w": 523,
+  "h": 305,
+  "left": 25,
+  "right": 509,
+  "top": 16,
+  "bottom": 269
+ }
+}
