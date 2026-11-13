@@ -105,6 +105,13 @@ def pepper_parts():
         cv2.fillPoly(m, [np.array(poly, np.int32)], 1)
         arms |= m
         a = cv2.GaussianBlur(m.astype(np.float32), (0, 0), 1.2)
+        # the painted hand is replaced by a rigged hand: cut the arm at the end of the cuff
+        el = np.array([215.0, 855.0]) if side == "l" else np.array([2 * PEP_MID - 215.0, 855.0])
+        wr = np.array([135.0, 1085.0]) if side == "l" else np.array([2 * PEP_MID - 135.0, 1085.0])
+        u = (wr - el) / np.linalg.norm(wr - el)
+        Y, X = np.mgrid[0:h, 0:w].astype(np.float32)
+        along = (X - wr[0]) * u[0] + (Y - wr[1]) * u[1]
+        a *= np.clip((-2 - along) / 3, 0, 1)
         arm = im.copy()
         arm[..., 3] = (arm[..., 3] * a).astype(np.uint8)
         cv2.imwrite(f"{out}/arm_{side}.png", arm)
@@ -124,7 +131,7 @@ def pepper_parts():
         credit='Painting: Pepper model sheet by David Revoy (peppercarrot.com), CC BY 4.0, cut out and animated',
         arm_l=dict(file="arm_l.png", shoulder=[235, 650], elbow=[215, 855], wrist=[135, 1085], grip=[112, 1150]),
         arm_r=dict(file="arm_r.png", shoulder=[2 * PEP_MID - 235, 650], elbow=[2 * PEP_MID - 215, 855], wrist=[2 * PEP_MID - 135, 1085], grip=[2 * PEP_MID - 112, 1150]),
-        arm_width=75)
+        arm_width=75, hand=dict(skin_bgr=[124, 159, 220], length=150))
     json.dump(J, open(f"{out}/parts.json", "w"), indent=1)
 
 

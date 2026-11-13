@@ -146,22 +146,9 @@ def forearm_hand():
     w, h = 330, 900
     E, Wr = (165, 125), (165, 125 + 470)
     img = np.zeros((h, w, 4), np.float32)
-    # fist under the cuff: fingers wrapped toward the viewer, thumb on top
     fy = Wr[1]
-    fist = np.concatenate([
-        arc((165, fy + 10), 92, 40, math.radians(180), math.radians(360), 20),
-        arc((165 + 70, fy + 95), 34, 95, math.radians(-80), math.radians(80), 20),
-        arc((165, fy + 175), 88, 38, math.radians(10), math.radians(170), 24),
-        arc((165 - 75, fy + 95), 30, 90, math.radians(100), math.radians(260), 20)])
-    m = fill(img, fist, tex("skin", h, w, SKIN, 2), 5)
-    shade(img, m, 1, 0.12)
-    stroke(img, fist, 11, closed=True, seed=6)
-    # fingers wrap across the grip: three gaps across the fist, thumb along the outer side
-    for k, y in enumerate((fy + 72, fy + 110, fy + 148)):
-        stroke(img, [(88 + 3 * k, y - 4), (130, y + 2), (170, y + 3), (196, y)], 7, seed=7 + k)
-    stroke(img, [(222, fy + 30), (236, fy + 80), (232, fy + 130)], 8, seed=11)  # thumb
     # sleeve and cuff
-    sleeve = capsule(E, 106, (165, fy - 40), 100, bulge=-4)
+    sleeve = capsule(E, 106, (165, fy - 100), 100, bulge=-4)
     m2 = fill(img, sleeve, tex("jacket", h, w, JACKET, 3), 13)
     shade(img, m2, -1, 0.10)
     stroke(img, sleeve, 12, closed=True, seed=14)
@@ -173,7 +160,7 @@ def forearm_hand():
     paste(img, button_sprite(), 225, fy - 46)
     stroke(img, [(120, 215), (160, 240)], 7, seed=17)  # sleeve folds near the elbow
     stroke(img, [(190, 230), (215, 262)], 7, seed=18)
-    return img, dict(elbow=E, wrist=Wr, grip=(165, fy + 95))
+    return img, dict(elbow=E, wrist=(165, fy - 8))  # the hand is a rigged hand (puppet/hand.py)
 
 
 EXT = 450  # rows added below the page edge
@@ -228,7 +215,7 @@ def main():
     save(f"{OUT}/forearm.png", fa)
     save(f"{OUT}/body.png", body())
     j = dict(credit="Drawing: Ben (arms and jacket sides: code stand-ins)",
-             pad=PAD, upper_arm=dict(file="upper_arm.png", **{k: list(v) for k, v in ua_j.items()}),
+             pad=PAD, hand=dict(skin_bgr=list(SKIN), length=360), upper_arm=dict(file="upper_arm.png", **{k: list(v) for k, v in ua_j.items()}),
              forearm=dict(file="forearm.png", **{k: list(v) for k, v in fa_j.items()}),
              shoulders=dict(left=[PAD - 85, 1455], right=[PAD + 1150 + 90, 1430]), arm_width=230)
     json.dump(j, open(f"{OUT}/parts.json", "w"), indent=1)

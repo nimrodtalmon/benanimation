@@ -18,6 +18,7 @@ import warp  # noqa: E402
 from limb import Limb, join_parts  # noqa: E402
 import props  # noqa: E402
 from props import blit, microphone, place  # noqa: E402
+import hand as handrig  # noqa: E402
 
 ROOT = warp.ROOT
 FPS, W, H = warp.FPS, warp.W, warp.H
@@ -87,7 +88,21 @@ class Singer:
         wj = u.shape[1] - 1
         jm = {k: [wj - v[0], v[1]] for k, v in jt.items()}
         self.arm_r = Limb(uf, ff, jm, j["arm_width"], inner=1)
-        self.mic, self.mic_a = microphone()
+        hs = j["hand"]
+        ben = handrig.Style(skin=np.array(hs["skin_bgr"]) / 255, ink=(0.075, 0.07, 0.08), ink_w=0.03, shade=0.0, flat=True)
+        self.mic_hand = handrig.Hand(ben, mirror=True)
+        self.free_hand = handrig.Hand(ben, mirror=True)
+        self.hand_size = hs["length"] * scale
+        g, ax = np.array([0.0, 0.44, -0.115]), np.array([1.0, 0, 0])
+        self.mic_head = g + 0.40 * ax
+        self.mic = [dict(p0=g - 0.30 * ax, p1=g + 0.24 * ax, r0=0.040, r1=0.052, color=(0.13, 0.13, 0.15), gloss=0.5),
+                    dict(p0=g + 0.28 * ax, p1=g + 0.29 * ax, r0=0.066, r1=0.066, color=(0.75, 0.75, 0.78), gloss=0.6),
+                    dict(p0=self.mic_head, p1=self.mic_head, r0=0.110, r1=0.110, color=(0.62, 0.63, 0.66), mesh=True, gloss=0.5)]
+        R0 = handrig.orient(0, 0, 180) @ np.diag([-1.0, 1, 1])
+        d0, h0 = R0 @ ax, R0 @ np.array([0, 1.0, 0])
+        self.mic_a0 = math.atan2(d0[1], d0[0])  # mic axis on screen at yaw 0
+        self.hand_a0 = math.atan2(h0[1], h0[0])  # wrist-to-fingers axis on screen at yaw 0
+        self.anchor = (0.0, -0.05, 0.0)
         self.env, self.vowels, self.sing = song_drivers()
         self.up = Spring(0.0, omega=7.0)
         self.free = None
@@ -140,30 +155,99 @@ class Singer:
             self.free = Spring(free_t, omega=11.0, zeta=0.75)
         wt = self.free.step(free_t)
         E, Wr = self.arm_r.solve(shR, wt, s)
+        fa = math.degrees(math.atan2(Wr[1] - E[1], Wr[0] - E[0])) - 90
+        img, xy, frac = self.free_hand.render(handrig.POSES["fist" if pump else "relaxed"], handrig.orient(fa, 10, 0), self.hand_size, Wr, anchor=self.anchor)
+        over_sub(frame, img, xy, frac)
         lay, (x, y) = self.arm_r.render(shR, E, Wr, s, (W, H))
         if lay is not None:
             warp.over(frame, lay, x, y)
         # the mic arm: up to the mouth while singing, down at the chest in pauses
         u = float(np.clip(self.up.step(self.sing[f]), 0, 1))
         u = u * u * (3 - 2 * u)
-        head_up = mouth + np.array([-0.25 * mw, 1.55 * mw]) + np.array([0, 2.0 * mw * 0.05 * on_beat])
-        head_dn = mouth + np.array([-2.2 * mw, 5.2 * mw])
+        head_up = mouth + np.array([-0.10 * mw, 1.15 * mw]) + np.array([0, 0.1 * mw * on_beat])
+        head_dn = mouth + np.array([-2.0 * mw, 5.0 * mw])
         head = head_dn * (1 - u) + head_up * u
-        ang = math.radians(-8 * (1 - u) + 24 * u + 4 * math.sin(t * 1.3))
-        d = np.array([math.sin(ang), -math.cos(ang)])
-        grip_len = (self.mic_a["grip"][1] - self.mic_a["head"][1]) * s
-        grip = head - d * grip_len
+        phi = math.radians(-90 + (-5 * (1 - u) + 22 * u) + 4 * math.sin(t * 1.3))  # mic axis on screen (up = -90)
         L = self.arm_l
-        wrist = grip.copy()
-        for _ in range(3):  # wrist sits behind the grip along the forearm
-            E, Wr = L.solve(shL, wrist, s)
-            g, a2 = L.grip(shL, E, Wr, s)
-            wrist = wrist + (grip - g)
-        E, Wr = L.solve(shL, wrist, s)
-        blit(frame, self.mic, place(self.mic, self.mic_a["grip"], grip, ang, s))
+        fore = getattr(self, "_fore", -math.pi / 4)
+        Mr = np.diag([-1.0, 1, 1])
+        ax = np.array([1.0, 0, 0])
+        for _ in range(4):
+            # the hand follows the forearm (wrist bend up to 45 deg); the rest turns the mic in the fist
+            yaw_mic = math.degrees(phi - self.mic_a0)
+            yaw_arm = math.degrees(fore - self.hand_a0)
+            dy = (yaw_mic - yaw_arm + 180) % 360 - 180
+            yaw = yaw_arm + max(-45, min(45, dy))
+            R = handrig.orient(yaw, 0, 180)
+            T = R @ Mr
+            delta = phi - (math.radians(yaw) + self.mic_a0)
+            rot = np.linalg.solve(T, handrig._rot((0, 0, 1), delta) @ T)  # in-hand turn of the mic
+            g = np.array([0.0, 0.44, -0.115])
+            head3 = g + rot @ (self.mic_head - g)
+            off = ((T @ head3)[:2] - (T @ np.array(self.anchor))[:2]) * self.hand_size
+            E, Wr = L.solve(shL, head - off, s)
+            fore = math.atan2(Wr[1] - E[1], Wr[0] - E[0])
+        self._fore = fore
+        held = [dict(q, p0=g + rot @ (np.array(q["p0"]) - g), p1=g + rot @ (np.array(q["p1"]) - g)) for q in self.mic]
+        img, xy, frac = self.mic_hand.render(handrig.POSES["mic"], R, self.hand_size, Wr, anchor=self.anchor, held=held)
+        over_sub(frame, img, xy, frac)
         lay, (x, y) = L.render(shL, E, Wr, s, (W, H))
         if lay is not None:
             warp.over(frame, lay, x, y)
+
+
+# ---------------------------------------------------------------- rigged hands
+def over_sub(dst, img, xy, frac):
+    """Composite a BGRA layer at a sub-pixel position (smooth, delicate motion)."""
+    if abs(frac[0]) > 1e-3 or abs(frac[1]) > 1e-3:
+        M = np.float32([[1, 0, frac[0]], [0, 1, frac[1]]])
+        img = cv2.warpAffine(img, M, (img.shape[1] + 1, img.shape[0] + 1), flags=cv2.INTER_LINEAR, borderValue=0)
+    warp.over(dst, img, int(xy[0]), int(xy[1]))
+
+
+class StickHand:
+    """A rigged hand holding a drumstick. The stick sits between thumb and index (the fulcrum);
+    the wrist bends up to a limit, the rest of the stick angle is a pivot in the fingers."""
+    FULCRUM = np.array([0.06, 0.44, -0.115])
+    S0 = np.array([0.75, 0.62, 0.0]) / np.linalg.norm([0.75, 0.62, 0.0])
+
+    def __init__(self, skin, size, mirror, pitch=62, roll=18, style=None):
+        st = style or handrig.Style(skin=np.array(skin) / 255, ink=(0.16, 0.12, 0.12), ink_w=0.016, shade=0.5)
+        self.h = handrig.Hand(st, mirror=mirror)
+        self.size, self.mirror, self.pitch, self.roll = size, mirror, pitch, roll
+        self.L = 1.85  # stick length in hand lengths
+        self.Mr = np.diag([-1.0, 1, 1]) if mirror else np.eye(3)
+
+    def _T(self, yaw):
+        return handrig.orient(yaw, self.pitch, self.roll) @ self.Mr
+
+    def solve(self, phi, fore_angle):
+        """phi: wanted stick angle on screen (rad); fore_angle: forearm angle (rad).
+        Returns yaw (deg) and the stick direction in hand space."""
+        T0 = self._T(0)
+        d0 = T0 @ self.S0
+        a0 = math.atan2(d0[1], d0[0])
+        yaw_stick = math.degrees(phi - a0)
+        yaw_arm = math.degrees(fore_angle) - 90
+        dy = (yaw_stick - yaw_arm + 180) % 360 - 180
+        yaw = yaw_arm + max(-38, min(38, dy))
+        delta = phi - (math.radians(yaw) + a0)
+        T = self._T(yaw)
+        Rz = handrig._rot((0, 0, 1), delta)
+        s_hand = np.linalg.solve(T, Rz @ (T @ self.S0))
+        return yaw, s_hand
+
+    def tip_offset(self, yaw, s_hand, anchor):
+        T = self._T(yaw)
+        tip = self.FULCRUM + s_hand * self.L * 0.78
+        return ((T @ tip)[:2] - (T @ np.asarray(anchor))[:2]) * self.size
+
+    def render(self, yaw, s_hand, loose, wrist, anchor):
+        pose = handrig.Pose.mix(handrig.POSES["stick"], handrig.POSES["stick_loose"], float(np.clip(loose, 0, 1)))
+        g = self.FULCRUM
+        held = [dict(p0=g - s_hand * self.L * 0.22, p1=g + s_hand * self.L * 0.78, r0=0.042, r1=0.028, color=(0.42, 0.66, 0.84), gloss=0.35),
+                dict(p0=g + s_hand * self.L * 0.79, p1=g + s_hand * self.L * 0.80, r0=0.036, r1=0.036, color=(0.50, 0.74, 0.90), gloss=0.5)]
+        return self.h.render(pose, handrig.orient(yaw, self.pitch, self.roll), self.size, wrist, anchor=anchor, held=held)
 
 
 # ---------------------------------------------------------------- the drummer (Revoy's Pepper)
@@ -200,17 +284,20 @@ class Drummer:
         # the kit, placed in the drummer's (crop) coordinates
         skull = cv2.imread(f"{ROOT}/public/clip/skull.png", cv2.IMREAD_UNCHANGED)
         self.kit = dict(
-            kick=(props.kick_front(370 * s, skull), P(403, 1450)),
-            floor=(props.drum(160 * s, 170 * s), P(20, 1250)),
-            tom_hi=(props.drum(100 * s, 90 * s), P(318, 1055)),
-            tom_mid=(props.drum(108 * s, 95 * s), P(500, 1055)),
-            snare=(props.drum(135 * s, 78 * s, props.CHROME), P(250, 1165)),
-            hat=(props.cymbal(125 * s), P(612, 1125)),
-            hat_low=(props.cymbal(125 * s), P(612, 1143)),
-            crash=(props.cymbal(175 * s), P(720, 860)),
+            kick=(props.kick_front(330 * s, skull), P(403, 1470)),
+            floor=(props.drum(165 * s, 180 * s, seed=4), P(70, 1255)),
+            tom_hi=(props.drum(128 * s, 105 * s, seed=1), P(300, 1100)),
+            tom_mid=(props.drum(135 * s, 110 * s, seed=2), P(515, 1100)),
+            snare=(props.drum(150 * s, 70 * s, chrome=True, seed=5), P(225, 1185)),
+            hat=(props.cymbal(132 * s), P(625, 1150)),
+            hat_low=(props.cymbal(132 * s), P(625, 1168)),
+            crash=(props.cymbal(185 * s), P(705, 900)),
         )
-        self.stick, self.stick_a = props.stick(int(230 * s))
-        self.stick_len = (self.stick_a["grip"][1] - self.stick_a["tip"][1])
+        self.floor_y = P(0, 1760)[1]
+        self.ao = None
+        hs = j["hand"]
+        self.hands = {"l": StickHand(hs["skin_bgr"], hs["length"] * s, mirror=False), "r": StickHand(hs["skin_bgr"], hs["length"] * s, mirror=True)}
+        self.hand_anchor = (0.0, -0.04, 0.0)  # the wrist sits a little inside the cuff
         # which hand plays what: viewer's left (her right hand) = snare and toms, viewer's right = hats and crash
         piece_at = {DRUM["SNARE"]: "snare", DRUM["TOM_HI"]: "tom_hi", DRUM["TOM_MID"]: "tom_mid", DRUM["TOM_LO"]: "floor",
                     DRUM["HAT"]: "hat", DRUM["OPEN_HAT"]: "hat", DRUM["CRASH"]: "crash"}
@@ -231,6 +318,7 @@ class Drummer:
         self.times = {k: np.array([d["t"] for d in SONG["drums"] if d["piece"] in v]) for k, v in dict(
             kick=[36], snare=[38], hat=[42, 46], open=[46], crash=[49], tom_hi=[50], tom_mid=[47], floor=[45]).items()}
         self.prev_turn = 0.0
+        self.prev_fore = {}
 
     def strike_point(self, what, side):
         img, anc = self.kit[what][0]
@@ -248,7 +336,7 @@ class Drummer:
         base = {"l": math.radians(55), "r": math.radians(125)}[side]
         rest_what = "snare" if side == "l" else "hat"
         if i < 0:
-            p0, w0, t0 = self.strike_point(rest_what, side), rest_what, -9
+            p0, w0, t0 = self.strike_point(rest_what, side), rest_what, -9.0
         else:
             t0, w0, _ = hits[i]
             p0 = self.strike_point(w0, side)
@@ -258,19 +346,21 @@ class Drummer:
         else:
             t1, w1, v1, p1 = t0 + 9, w0, 80, p0
         gap = t1 - t0
+        sgn = -1 if side == "l" else 1
+        cym = lambda w: w in ("hat", "crash")  # noqa: E731
+        a0 = base + sgn * (math.radians(10) if cym(w0) else 0.0)
+        a1 = base + sgn * (math.radians(10) if cym(w1) else 0.0)
         if gap > 1.2:  # long pause: rest, then a lead-in of 0.5 s
             if t < t1 - 0.5:
-                return p0 + np.array([0, -18]) * self.s / 0.72, base, 0.0
+                return p0 + np.array([0, -14]) * self.s / 0.72, a0, a0 + sgn * math.radians(12), 0.15
             t0, gap = t1 - 0.5, 0.5
         u = np.clip((t - t0) / gap, 0, 1)
         e = u * u * (3 - 2 * u)
-        tip = p0 * (1 - e) + p1 * e
+        tip = p0 * (1 - e) + p1 * e  # where the tip would be with the stick down
+        ang = a0 * (1 - e) + a1 * e
         lift = math.sin(math.pi * u ** 0.7) * min(1.0, gap / 0.45) * (0.6 + 0.4 * v1 / 127)
-        tip = tip + np.array([0, -150 * self.s * lift])
-        ang = base + (-1 if side == "l" else 1) * math.radians(55) * lift
-        if w1 in ("hat", "crash") or (u < 0.5 and w0 in ("hat", "crash")):
-            ang = base + (-1 if side == "l" else 1) * math.radians(10) + (-1 if side == "l" else 1) * math.radians(50) * lift
-        return tip, ang, lift
+        ang_now = ang + sgn * math.radians(58) * lift  # the wrist flicks the stick up
+        return tip, ang, ang_now, lift
 
     def draw(self, frame, t):
         p, s = self.p, self.s
@@ -296,33 +386,49 @@ class Drummer:
         fig = cv2.remap(fig, (px + c * ox + sn * oy).astype(np.float32), (py - sn * ox + c * oy - nod * p.w_bend).astype(np.float32),
                         cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
         top = self.top + bounce
-        # hands: stick tips from the score, then IK for each arm
+        # hands: stick tips from the score; the wrist is found from the tip (hand + stick geometry), then IK
         poses = {}
         for side in ("l", "r"):
-            tip, ang, lift = self.hand_pose(side, t)
+            tip, ang, ang_now, lift = self.hand_pose(side, t)
             tip = tip + np.array([0, bounce * 0.5])
-            d = np.array([math.cos(ang), math.sin(ang)])
-            grip = tip - d * self.stick_len * s / s  # stick sprite is already at screen scale
             L = self.arms[side]
-            L.fore_k = 0.6 + 0.25 * lift  # forearms point at the kit (toward us); lifted they show more
+            L.fore_k = 0.55 + 0.2 * lift  # forearms point at the kit (toward us); lifted they show more
             S = np.array([self.x0 + L.S0[0] * s, top + L.S0[1] * s])
-            wrist = grip.copy()
-            for _ in range(3):
+            hd = self.hands[side]
+            fore = self.prev_fore.get(side, L.a2_0)
+            for _ in range(4):  # wrist for the stick-down pose ...
+                yaw, s_hand = hd.solve(ang, fore)
+                wrist = tip - hd.tip_offset(yaw, s_hand, self.hand_anchor)
+                wrist = wrist + np.array([0, -45 * s * lift])  # ... raised a little on the backstroke
                 E, Wr = L.solve(S, wrist, s)
-                g, _ = L.grip(S, E, Wr, s)
-                wrist = wrist + (grip - g)
-            E, Wr = L.solve(S, wrist, s)
-            poses[side] = (S, E, Wr, grip, ang)
-        # back to front: crash stand, upper arms, body, cymbals, drums, forearms + sticks
+                fore = math.atan2(Wr[1] - E[1], Wr[0] - E[0])
+            self.prev_fore[side] = fore
+            yaw, s_hand = hd.solve(ang_now, fore)
+            loose = lift * 1.4 - 0.15
+            poses[side] = (S, E, Wr, yaw, s_hand, loose)
+        # back to front: floor shadows, stands, upper arms, body (shaded behind the kit), cymbals, drums, hands, forearms
+        kx, ky = self.kit["kick"][1]
+        props.floor_shadow(frame, kx, min(H - 5, ky + 300 * s), 520 * s, 60 * s, 0.55)
+        sw = max(4, int(8 * s / 0.72))
         for what in ("crash", "hat"):
             x, y = self.kit[what][1]
-            props.pole(frame, (x, y), (x + 10, H + 10), int(8 * s / 0.72))
+            props.stand(frame, (x, y), min(H + 30, self.floor_y), sw)
+        sx, sy = self.kit["snare"][1]
+        props.stand(frame, (sx, sy + 60 * s), min(H + 30, self.floor_y), sw, tilter=False)
         for side in ("l", "r"):
-            S, E, Wr, _, _ = poses[side]
+            S, E, Wr = poses[side][:3]
             lay, (x, y) = self.arms[side].render(S, E, Wr, s, (W, H), part="upper")
             if lay is not None:
                 warp.over(frame, lay, x, y)
         warp.over(frame, fig, self.x0, int(top))
+        if self.ao is None:  # the kit shades what is right behind it
+            m = np.zeros((H, W, 3), np.float32)
+            for what in ("floor", "tom_hi", "tom_mid", "kick", "snare"):
+                img, anc = self.kit[what][0]
+                blit(m, np.dstack([np.ones_like(img[..., :3]), img[..., 3:]]), place(img, anc.get("head", anc.get("center")), self.kit[what][1], 0.0, 1.0))
+            m = cv2.GaussianBlur(m[..., 0], (0, 0), 30 * s)
+            self.ao = (1 - 0.45 * np.clip(m * 1.4, 0, 1))[..., None].astype(np.float32)
+        frame *= self.ao
         crash, _ = decay_since(t, self.times["crash"], 0.7)
         hat, dt_hat = decay_since(t, self.times["hat"], 0.15)
         opened = decay_since(t, self.times["open"], 0.35)[0]
@@ -337,6 +443,11 @@ class Drummer:
             else:
                 ang = 0.0
             blit(frame, img, place(img, anc["center"], (x, y), ang, 1.0))
+        for what in ("floor", "tom_hi", "tom_mid"):
+            pass
+        for (tw, ax) in (("tom_hi", -60), ("tom_mid", 60)):  # tom arms out of the bass drum
+            tx, ty = self.kit[tw][1]
+            props.tom_mount(frame, (kx + ax * s, ky - 300 * s), (tx, ty + 80 * s), max(4, int(9 * s / 0.72)))
         for what in ("floor", "tom_hi", "tom_mid", "kick", "snare"):  # back to front
             img, anc = self.kit[what][0]
             x, y = self.kit[what][1]
@@ -346,9 +457,9 @@ class Drummer:
             anchor = anc.get("head", anc.get("center"))
             blit(frame, img, place(img, anchor, (x, y + 3 * hit), 0.0, sc))
         for side in ("l", "r"):
-            S, E, Wr, grip, ang = poses[side]
-            a = ang + math.pi / 2  # the stick sprite points up (tip on top)
-            blit(frame, self.stick, place(self.stick, self.stick_a["grip"], grip, a, 1.0))
+            S, E, Wr, yaw, s_hand, loose = poses[side]
+            img, xy, frac = self.hands[side].render(yaw, s_hand, loose, Wr, self.hand_anchor)
+            over_sub(frame, img, xy, frac)
             lay, (x, y) = self.arms[side].render(S, E, Wr, s, (W, H), part="fore")
             if lay is not None:
                 warp.over(frame, lay, x, y)
@@ -373,13 +484,13 @@ def soft_poly(shape, pts, s, sigma):
 
 
 class Guitarist:
-    def __init__(self, scale=0.85, cx=W / 2, top=None):
+    def __init__(self, scale=0.78, cx=W / 2, top=None):
         cfg = dict(CORI_HEAD, full="public/paint/coriander-full.png", height=2070 * scale)
         self.p = warp.Puppet(cfg)
         self.cfg, self.s = cfg, scale
         self.j = dict(credit='Painting: "Coriander concept art" by David Revoy (peppercarrot.com), CC BY 4.0, cut out and animated')
         self.x0 = int(cx - 760 * scale)
-        self.top = int(-30 - 115 * scale) if top is None else top
+        self.top = int(20 - 120 * scale) if top is None else top
         sh = self.p.head.shape[:2]
         s = scale
         self.w_strum = soft_poly(sh, CORI_STRUM_ARM, s, 28)
@@ -387,6 +498,22 @@ class Guitarist:
         self.w_fret = soft_poly(sh, [(935, 1095), (1070, 1090), (1085, 1170), (1055, 1240), (960, 1240), (930, 1170)], s, 14)
         self.m_fret = soft_poly(sh, CORI_FRET_HAND, s, 2)
         self.piv_strum = np.array([560, 985]) * s
+        # her painted hands (and the bottle) are replaced by rigged hands: paint them out with the coat
+        img = self.p.head
+        rm = np.zeros(sh, np.uint8)
+        for poly in (CORI_FRET_HAND, [(400, 1105), (530, 1105), (545, 1300), (420, 1310), (390, 1200)]):
+            cv2.fillPoly(rm, [np.round(np.array(poly) * s).astype(np.int32)], 1)
+        rm = cv2.dilate(rm, np.ones((5, 5), np.uint8))
+        bgr = np.clip(img[..., :3] * 255, 0, 255).astype(np.uint8)
+        fill = cv2.inpaint(bgr, rm, 9, cv2.INPAINT_TELEA).astype(np.float32) / 255
+        img[..., :3] = np.where(rm[..., None] > 0, fill, img[..., :3])
+        skin = (106, 159, 196)
+        st = handrig.Style(skin=np.array(skin) / 255, ink=(0.14, 0.11, 0.11), ink_w=0.017, shade=0.5)
+        self.strum_hand = handrig.Hand(st, mirror=False)
+        self.fret_hand = handrig.Hand(st, mirror=True)
+        self.hsize = 190 * s
+        self.strum_wrist = np.array([458, 1188]) * s
+        self.strum_elbow = np.array([540, 1000]) * s
         self.g, self.ga = props.guitar(440 * s)
         self.g_angle = math.radians(-5)
         self.strum_at = np.array([470, 1215]) * s
@@ -439,12 +566,12 @@ class Guitarist:
         ws = self.w_strum * th
         dx = (X - px) * (np.cos(ws) - 1) - (Y - py) * np.sin(ws)
         dy = (X - px) * np.sin(ws) + (Y - py) * (np.cos(ws) - 1)
-        slide = (-34 * s * fpos)
-        dx = dx + self.w_fret * slide * d_neck[0]
-        dy = dy + self.w_fret * slide * d_neck[1]
+        slide = -0.12 * self.ga["neck_len"] * fpos
+        dx = dx + self.w_fret * (slide * d_neck[0])
+        dy = dy + self.w_fret * (slide * d_neck[1] + 95 * s)  # the cuff comes down to meet the hand under the neck
         mx, my = (X - dx).astype(np.float32), (Y - dy).astype(np.float32)
         fig = cv2.remap(fig, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-        hands = np.maximum(cv2.remap(self.m_strum, mx, my, cv2.INTER_LINEAR), cv2.remap(self.m_fret, mx, my, cv2.INTER_LINEAR))
+
         # head tilt / nod
         thh = math.radians(tilt) * p.w_bend
         hx, hy = p.pivot
@@ -454,23 +581,66 @@ class Guitarist:
                         cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
         bob = 5 * s * on_beat
         top = self.top + bob
-        warp.over(frame, fig, self.x0, int(top))
-        # guitar (moves with the body), on a strap over her shoulder; strings ring after each strum
+        org = np.array([self.x0, top])
+        # guitar (moves with the body), hung on a strap; strings ring after each strum
         ring, _ = decay_since(t, self.strum_t, 0.35)
         gimg = props.strings(self.g, self.ga, ring, t)
-        at = np.array([self.x0, top]) + self.strum_at
-        M = place(gimg, self.ga["strum"], at, self.g_angle, 1.0)
-        butt = M @ np.array([self.ga["bridge"][0] - 0.30 * self.ga["neck"][0] / 1.0 * 0.9, self.ga["bridge"][1] - 0.06 * self.ga["neck_len"], 1])
-        shoulder = np.array([self.x0, top]) + np.array([905, 745]) * s
-        strap = np.array([butt, butt * 0.35 + shoulder * 0.65 + np.array([0, 25 * s]), shoulder])
-        pts = props._chaikin(np.vstack([strap, strap[::-1] + [0, 0.01]]), 0)[:3]
-        cv2.polylines(frame, [np.round(pts * 4).astype(np.int32)], False, props.INK, int(44 * s), cv2.LINE_AA, shift=2)
-        cv2.polylines(frame, [np.round(pts * 4).astype(np.int32)], False, (0.10, 0.16, 0.26), int(34 * s), cv2.LINE_AA, shift=2)
-        cv2.polylines(frame, [np.round((pts + [0, -6 * s]) * 4).astype(np.int32)], False, (0.25, 0.35, 0.45), max(1, int(3 * s)), cv2.LINE_AA, shift=2)
+        M = place(gimg, self.ga["strum"], org + self.strum_at, self.g_angle, 1.0)
+        Lb = (self.ga["neck"][0] - self.ga["bridge"][0]) / 0.67
+        ox, oy = self.ga["neck"][0] - Lb, self.ga["neck"][1]
+        butt = M @ np.array([ox + 0.01 * Lb, oy, 1])
+        horn = M @ np.array([ox + 0.86 * Lb, oy - 0.33 * Lb, 1])
+        sw = 30 * s
+        # the back strap runs from the butt end behind her right side
+        props.strap(frame, [butt, butt + np.array([20, -60]) * s, org + np.array([470, 1080]) * s], sw)
+        warp.over(frame, fig, self.x0, int(top))
+        # the guitar casts a soft shadow on her coat
+        gm = np.zeros((H // 4, W // 4), np.float32)
+        Ms = M.copy()
+        Ms[:, 2] += np.array([14, 20]) * s
+        Ms /= 4
+        gm = cv2.warpAffine(self.g[..., 3], Ms, (W // 4, H // 4), flags=cv2.INTER_LINEAR)
+        gm = cv2.resize(cv2.GaussianBlur(gm, (0, 0), 3 * s + 1), (W, H))[..., None]
+        figm = np.zeros((H, W), np.float32)
+        fh, fw = fig.shape[:2]
+        y0, x0_ = int(top), self.x0
+        ya, yb = max(0, y0), min(H, y0 + fh)
+        xa, xb = max(0, x0_), min(W, x0_ + fw)
+        figm[ya:yb, xa:xb] = fig[ya - y0:yb - y0, xa - x0_:xb - x0_, 3]
+        frame *= 1 - 0.45 * gm * figm[..., None]
+        # the front strap: from the horn over her left shoulder
+        shoulder = org + np.array([905, 745]) * s
+        props.strap(frame, [horn, horn * 0.4 + shoulder * 0.6 + np.array([-30, 10]) * s, shoulder], sw)
         blit(frame, gimg, M)
-        hl = fig.copy()
-        hl[..., 3] *= hands
-        warp.over(frame, hl, self.x0, int(top))
+        props.button(frame, butt, 6 * s)
+        props.button(frame, horn, 6 * s)
+        org = np.array([self.x0, top])
+        # fretting hand: fingers arch over the neck onto the fretboard, palm and thumb behind the neck
+        nk0 = M @ np.array([self.ga["neck"][0], self.ga["neck"][1], 1])
+        nk1 = M @ np.array([self.ga["nut"][0], self.ga["nut"][1], 1])
+        fret_at = nk0 + (nk1 - nk0) * (0.55 - 0.12 * fpos)
+        g_ang = self.g_angle
+        neck_w = self.ga["neck_w"]
+        yaw_f = math.degrees(g_ang) + 180  # fingers point up, hand x runs along the neck
+        Rf = handrig.orient(yaw_f, -30, 180)
+        neck_c = np.array([0.0, 0.62, 0.0])
+        held = [dict(p0=neck_c - [0.9, 0, 0], p1=neck_c + [0.9, 0, 0], r0=neck_w / 2 / self.hsize, r1=neck_w / 2 / self.hsize, hidden=True)]
+        press = 0.15 * decay_since(t, self.strum_t, 0.12)[0]
+        fp = handrig.POSES["fret"]
+        pose = handrig.Pose({k: tuple(a * (1 + press) for a in v) for k, v in fp.curls.items()}, fp.thumb, fp.thumb_dir, fp.spread)
+        img, xy, frac = self.fret_hand.render(pose, Rf, self.hsize, fret_at, anchor=neck_c, held=held)
+        over_sub(frame, img, xy, frac)
+        # picking hand: hangs from her (warped) cuff over the strings, pick between thumb and index
+        q, pv = self.strum_wrist, self.piv_strum
+        c_, s_ = math.cos(th), math.sin(th)
+        wr = pv + np.array([[c_, -s_], [s_, c_]]) @ (q - pv)
+        el = self.strum_elbow
+        fa = math.atan2(wr[1] - el[1], wr[0] - el[0])
+        Rs = handrig.orient(math.degrees(fa) - 90 - 25 + 10 * self.strum_pos(t), 25, -15)
+        pick = np.array([0.20, 0.52, -0.10])
+        held = [dict(p0=pick, p1=pick + [0.05, 0.05, 0], r0=0.045, r1=0.02, color=(0.25, 0.25, 0.85), gloss=0.5)]
+        img, xy, frac = self.strum_hand.render(handrig.POSES["pick"], Rs, self.hsize, org + wr, anchor=(0, -0.04, 0), held=held)
+        over_sub(frame, img, xy, frac)
 
 
 # ---------------------------------------------------------------- stage, camera, output

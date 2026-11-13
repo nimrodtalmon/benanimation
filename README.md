@@ -9,7 +9,9 @@ Everything in Python + OpenCV (`puppet/`), every move timed to the song (`src/so
 - `puppet/warp.py`: one drawing + landmarks -> head turn, jaw/mouth, blinks, hair sway, tilt/nod (Live2D-style pixel warps).
 - `puppet/limb.py`: bending arms from Ben's two arm drawings (upper arm, forearm+hand) or one painted arm: 2-bone IK,
   rigid parts, the outer elbow swept from the drawing's own cross-section, forearm cap as the crease, foreshortening.
-- `puppet/props.py`: mic, drum kit (Ben's skull on the kick), guitar, sticks, strap, drawn in code in a marker style.
+- `puppet/hand.py`: rigged hands with real fingers (palm + 5 fingers x 3 joints, 3D, z-buffered capsules, ink at depth jumps);
+  they hold the drumsticks (fulcrum grip, fingers loosen on the backstroke), the mic, the guitar neck and a pick.
+- `puppet/props.py`: mic, drum kit (sparkle shells, chrome hoops, stands; Ben's skull on the kick), guitar, strap, drawn in code.
 - `puppet/band.py`: Singer (Ben's Distor + code stand-in arms), Drummer (David Revoy's Pepper model sheet, CC BY 4.0),
   Guitarist (Revoy's Coriander concept art, CC BY 4.0), stage, crowd, shot list.
   - `python3 puppet/band.py singer|drummer|guitarist [start dur]` -> `out/band-<who>.mp4`

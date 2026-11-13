@@ -113,7 +113,7 @@ def blit(dst, prop, M):
 
 
 # ---------------------------------------------------------------- drum kit
-RED_SHELL = ((0.10, 0.06, 0.32), (0.25, 0.18, 0.68))  # BGR dark, light: deep red lacquer
+RED_SHELL = ((0.10, 0.06, 0.32), (0.25, 0.18, 0.68))  # BGR dark, light: deep red sparkle lacquer
 CHROME = ((0.38, 0.38, 0.40), (0.92, 0.92, 0.94))
 HEAD = (0.86, 0.90, 0.92)
 BRASS = ((0.10, 0.38, 0.55), (0.45, 0.80, 0.95))
@@ -127,78 +127,178 @@ def _shell_tone(h, w, dark, light):
     return np.broadcast_to(col[None], (h, w, 3)).copy()
 
 
-def drum(rx, depth, shell=RED_SHELL, ink=5, lugs=6, tilt=0.30):
-    """A drum seen from the front and a little above. Anchor 'head' = center of the top head."""
+def _sparkle_shell(h, w, dark, light, seed=0, chrome=False):
+    """Lacquered or chrome cylinder: shading across, two specular stripes, sparkle flakes."""
+    x = np.linspace(-1, 1, w, dtype=np.float32)
+    base = np.clip(1 - np.abs(x + 0.15) ** 1.6, 0, 1)
+    col = np.asarray(dark, np.float32) * (1 - base[:, None]) + np.asarray(light, np.float32) * base[:, None]
+    img = np.broadcast_to(col[None], (h, w, 3)).copy()
+    spec = np.exp(-((x + 0.45) / 0.07) ** 2) * 0.55 + np.exp(-((x - 0.55) / 0.05) ** 2) * 0.25
+    if chrome:  # chrome reflects the room: dark and light bands
+        bands = 0.35 * np.sin(x * 9.0 + 1.0) + 0.25 * np.sin(x * 23.0)
+        img = img * (1 + bands[None, :, None] * 0.6)
+        spec = spec * 1.4
+    img = img + spec[None, :, None]
+    rng = np.random.default_rng(seed)
+    if not chrome:
+        fl = (rng.random((h, w)) > 0.985).astype(np.float32) * rng.uniform(0.2, 0.6, (h, w)).astype(np.float32)
+        fl = cv2.GaussianBlur(fl, (0, 0), 0.6) * 2.5
+        img = img + fl[..., None] * (0.4 + base[None, :, None])
+    return np.clip(img, 0, 1)
+
+
+def _head_tone(h, w, cx, cy, rx, ry, seed=0):
+    """Coated drum head: off-white, a little texture, stick wear in the middle, light from above."""
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    rr = np.sqrt(((xx - cx) / rx) ** 2 + ((yy - cy) / ry) ** 2)
+    img = np.broadcast_to(np.array(HEAD, np.float32), (h, w, 3)).copy()
+    img *= (0.93 + 0.07 * ((yy - cy) / ry * -0.5 + 0.5))[..., None]
+    rng = np.random.default_rng(seed)
+    n = cv2.GaussianBlur(rng.normal(0, 1, (h, w)).astype(np.float32), (0, 0), 1.2) * 0.025
+    img += n[..., None]
+    wear = np.exp(-((rr - 0.12) / 0.22) ** 2) * 0.07
+    img -= wear[..., None] * np.array([1.0, 1.0, 0.9], np.float32)
+    img *= (1 - 0.10 * np.clip(rr - 0.75, 0, 1) / 0.25)[..., None]
+    return np.clip(img, 0, 1)
+
+
+def drum(rx, depth, shell=RED_SHELL, ink=4, lugs=6, tilt=0.30, chrome=False, seed=0):
+    """A drum seen from the front and a little above, with chrome hoops, tension rods and lugs.
+    Anchor 'head' = center of the top head."""
     ry = rx * tilt
-    pad = ink + 4
-    w, h = int(2 * rx + 2 * pad), int(2 * ry + depth + 2 * pad)
+    hoop = max(4.0, rx * 0.06)
+    pad = ink + hoop + 6
+    w, h = int(2 * rx + 2 * pad), int(2 * ry + depth + 2 * pad + hoop)
     img = _canvas(w, h)
     cx, cy = w / 2, pad + ry
-    body = np.concatenate([_ellipse_pts(cx, cy, rx, ry, math.pi, 2 * math.pi, 40),
-                           _ellipse_pts(cx, cy + depth, rx, ry, 0, math.pi, 40)])
-    _poly(img, body, _shell_tone(h, w, *shell), ink=0)
-    # lugs and a hoop line at the bottom
+    body = np.concatenate([_ellipse_pts(cx, cy, rx, ry, math.pi, 2 * math.pi, 60),
+                           _ellipse_pts(cx, cy + depth, rx, ry, 0, math.pi, 60)])
+    _poly(img, body, _sparkle_shell(h, w, *(CHROME if chrome else shell), seed=seed, chrome=chrome), ink=0)
+    # shadow under the top hoop
+    sh = np.zeros((h, w), np.float32)
+    cv2.ellipse(sh, (int(cx), int(cy + hoop * 0.6)), (int(rx), int(ry)), 0, 0, 180, 1.0, int(hoop * 1.6), cv2.LINE_AA)
+    sh = cv2.GaussianBlur(sh, (0, 0), hoop * 0.5) * (img[..., 3])
+    img[..., :3] *= (1 - 0.45 * sh[..., None])
+    # tension rods and lugs
     for i in range(lugs):
-        a = math.pi * (0.12 + 0.76 * (i + 0.5) / lugs)
+        a = math.pi * (0.10 + 0.80 * (i + 0.5) / lugs)
         x = cx - rx * math.cos(a)
-        yb = cy + ry * math.sin(a) * 0.9
-        _poly(img, [(x - 4, yb + depth * 0.25), (x + 4, yb + depth * 0.25), (x + 4, yb + depth * 0.7), (x - 4, yb + depth * 0.7)],
-              (0.80, 0.80, 0.84), ink=2)
-    _line(img, _ellipse_pts(cx, cy + depth - 6, rx, ry, 0, math.pi, 40), 6, color=CHROME[1])
-    _line(img, _ellipse_pts(cx, cy + depth - 6, rx, ry, 0, math.pi, 40), 2, color=INK)
-    # top head + chrome hoop
-    _poly(img, _ellipse_pts(cx, cy, rx, ry), _gradient(h, w, HEAD, (0.70, 0.74, 0.78), axis=0), ink=0)
-    _line(img, _ellipse_pts(cx, cy, rx - 3, ry - 2), 7, closed=True, color=CHROME[1])
-    _line(img, body, ink, closed=True)
-    _line(img, _ellipse_pts(cx, cy, rx, ry), ink - 1, closed=True)
+        yb = cy + ry * math.sin(a)
+        lug_y0, lug_y1 = yb + depth * 0.30, yb + depth * 0.62
+        _line(img, [(x, yb + hoop), (x, lug_y0)], max(1.5, rx * 0.012), color=CHROME[1])
+        _poly(img, _chaikin([(x - rx * 0.03, lug_y0), (x + rx * 0.03, lug_y0), (x + rx * 0.03, lug_y1), (x - rx * 0.03, lug_y1)], 2),
+              _gradient(h, w, (0.55, 0.55, 0.58), (0.98, 0.98, 1.0)), ink=1.5)
+        if chrome is False and depth > rx * 0.5:  # bottom rods on deep drums
+            _line(img, [(x, lug_y1), (x, yb + depth - hoop)], max(1.5, rx * 0.012), color=CHROME[1])
+    # bottom hoop
+    for wv, col in ((hoop + 2, INK), (hoop, CHROME[1]), (hoop * 0.35, (1.0, 1.0, 1.0))):
+        _line(img, _ellipse_pts(cx, cy + depth - hoop * 0.3, rx, ry, 0.05, math.pi - 0.05, 60), wv, color=col)
+    # top head and hoop
+    _poly(img, _ellipse_pts(cx, cy, rx - hoop * 0.5, ry - hoop * 0.3), _head_tone(h, w, cx, cy, rx, ry, seed), ink=0)
+    for wv, col in ((hoop + 2.5, INK), (hoop, CHROME[0]), (hoop * 0.55, CHROME[1])):
+        _line(img, _ellipse_pts(cx, cy, rx - hoop * 0.3, ry - hoop * 0.2), wv, closed=True, color=col)
+    _line(img, _ellipse_pts(cx, cy - hoop * 0.25, rx - hoop * 0.3, ry - hoop * 0.2, math.pi * 1.15, math.pi * 1.6, 30), hoop * 0.3, color=(1, 1, 1))
+    _line(img, body, ink, closed=False)
     return img, dict(head=(cx, cy), top=(cx, cy))
 
 
-def kick_front(r, skull=None, ink=6):
-    """Bass drum seen from the front: shell ring, black resonant head, Ben's skull on it."""
-    pad = ink + 4
+def kick_front(r, skull=None, ink=5):
+    """Bass drum seen from the front: lacquered wood hoop with metal claws, black resonant head
+    with a port hole, Ben's skull on it."""
+    pad = ink + 8
     w = h = int(2 * r + 2 * pad)
     img = _canvas(w, h)
     c = w / 2
-    _poly(img, _ellipse_pts(c, c, r, r, n=160), _shell_tone(h, w, *RED_SHELL), ink=0)
-    _poly(img, _ellipse_pts(c, c, r * 0.90, r * 0.90, n=160), (0.11, 0.10, 0.12), ink=0)
-    _line(img, _ellipse_pts(c, c, r * 0.905, r * 0.905, n=160), 8, closed=True, color=CHROME[1])
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    ang = np.arctan2(yy - c, xx - c)
+    hoop_col = _sparkle_shell(h, w, *RED_SHELL, seed=3) * (0.85 + 0.25 * np.cos(ang + 2.2))[..., None]
+    _poly(img, _ellipse_pts(c, c, r, r, n=200), np.clip(hoop_col, 0, 1), ink=0)
+    rr = np.hypot(xx - c, yy - c) / r
+    headc = np.array([0.10, 0.09, 0.11], np.float32) * (1.0 + 0.6 * np.exp(-((xx - c + 0.35 * r) ** 2 + (yy - c + 0.4 * r) ** 2) / (0.5 * r) ** 2))[..., None]
+    _poly(img, _ellipse_pts(c, c, r * 0.88, r * 0.88, n=200), np.clip(headc, 0, 1), ink=0)
+    for wv, col in ((10, INK), (6, CHROME[0]), (3, CHROME[1])):
+        _line(img, _ellipse_pts(c, c, r * 0.885, r * 0.885, n=200), wv * r / 260, closed=True, color=col)
     if skull is not None:
         sk = skull.copy()
         a = cv2.erode(sk[..., 3], np.ones((5, 5), np.uint8))
         sk = sk.astype(np.float32) / 255
         sk[..., 3] = cv2.GaussianBlur(a.astype(np.float32) / 255, (0, 0), 1.2)
-        s = (r * 1.15) / sk.shape[0]
+        s = (r * 1.05) / sk.shape[0]
         sk = cv2.resize(sk, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
-        sh, sw = sk.shape[:2]
-        y0, x0 = int(c - sh / 2), int(c - sw / 2)
+        sh_, sw = sk.shape[:2]
+        y0, x0 = int(c - sh_ / 2 - r * 0.06), int(c - sw / 2)
         aa = sk[..., 3:4]
-        img[y0:y0 + sh, x0:x0 + sw, :3] = img[y0:y0 + sh, x0:x0 + sw, :3] * (1 - aa) + sk[..., :3] * aa
-    for i in range(10):  # tension rods on the hoop
-        a = 2 * math.pi * i / 10 + 0.3
-        x, y = c + r * 0.95 * math.cos(a), c + r * 0.95 * math.sin(a)
-        _poly(img, _ellipse_pts(x, y, 7, 7, n=16), (0.85, 0.85, 0.88), ink=2)
-    _line(img, _ellipse_pts(c, c, r, r, n=160), ink, closed=True)
+        img[y0:y0 + sh_, x0:x0 + sw, :3] = img[y0:y0 + sh_, x0:x0 + sw, :3] * (1 - aa) + sk[..., :3] * aa
+    # port hole, lower right
+    px, py, pr = c + r * 0.45, c + r * 0.50, r * 0.13
+    _poly(img, _ellipse_pts(px, py, pr, pr, n=50), (0.03, 0.03, 0.035), ink=0)
+    _line(img, _ellipse_pts(px, py, pr, pr, n=50), 3 * r / 260, closed=True, color=CHROME[1])
+    for i in range(12):  # claws and tension rods on the hoop
+        a = 2 * math.pi * i / 12 + 0.26
+        x0_, y0_ = c + r * 0.86 * math.cos(a), c + r * 0.86 * math.sin(a)
+        x1_, y1_ = c + r * 1.0 * math.cos(a), c + r * 1.0 * math.sin(a)
+        _line(img, [(x0_, y0_), (x1_, y1_)], 7 * r / 260, color=INK)
+        _line(img, [(x0_, y0_), (x1_, y1_)], 4 * r / 260, color=CHROME[1])
+    hl = np.zeros((h, w), np.float32)
+    cv2.ellipse(hl, (int(c), int(c)), (int(r * 0.95), int(r * 0.95)), 0, 200, 250, 1.0, max(2, int(r * 0.03)), cv2.LINE_AA)
+    hl = cv2.GaussianBlur(hl, (0, 0), r * 0.01 + 1)
+    img[..., :3] = img[..., :3] * (1 - 0.6 * hl[..., None]) + 0.6 * hl[..., None]
+    _line(img, _ellipse_pts(c, c, r, r, n=200), ink, closed=True)
     return img, dict(center=(c, c))
 
 
-def cymbal(rx, tilt=0.22, ink=4):
+def cymbal(rx, tilt=0.22, ink=3):
+    """Brass cymbal with fine lathe grooves, a bell, a felt and wing nut on top."""
     ry = rx * tilt
-    pad = ink + 4
-    w, h = int(2 * rx + 2 * pad), int(2 * ry + 2 * pad + rx * 0.12)
+    pad = ink + 6
+    w, h = int(2 * rx + 2 * pad), int(2 * ry + 2 * pad + rx * 0.22)
     img = _canvas(w, h)
-    cx, cy = w / 2, h / 2
-    out = np.concatenate([_ellipse_pts(cx, cy, rx, ry, 0, math.pi, 50), _ellipse_pts(cx, cy - rx * 0.03, rx, ry * 0.85, math.pi, 2 * math.pi, 50)])
-    _poly(img, out, _gradient(h, w, BRASS[0], BRASS[1], p=0.6) * 0.5 + _shell_tone(h, w, *BRASS) * 0.5, ink=0)
-    for k in (0.35, 0.55, 0.75):  # lathe rings
-        _line(img, _ellipse_pts(cx, cy, rx * k, ry * k), 1.5, closed=True, color=BRASS[0])
-    _poly(img, _ellipse_pts(cx, cy - ry * 0.25, rx * 0.16, ry * 0.42), BRASS[1], ink=2)  # bell
-    hl = np.zeros((h, w), np.float32)
-    cv2.ellipse(hl, (int(cx - rx * 0.35), int(cy - ry * 0.1)), (int(rx * 0.22), max(2, int(ry * 0.18))), 0, 0, 360, 1.0, -1, cv2.LINE_AA)
-    hl = cv2.GaussianBlur(hl, (0, 0), 4)
-    img[..., :3] = img[..., :3] * (1 - 0.6 * hl[..., None]) + 0.6 * hl[..., None]
+    cx, cy = w / 2, h / 2 + rx * 0.05
+    out = np.concatenate([_ellipse_pts(cx, cy, rx, ry, 0, math.pi, 80), _ellipse_pts(cx, cy - rx * 0.025, rx, ry * 0.86, math.pi, 2 * math.pi, 80)])
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    rr = np.sqrt(((xx - cx) / rx) ** 2 + ((yy - cy) / ry) ** 2)
+    ang = np.arctan2((yy - cy) / ry, (xx - cx) / rx)
+    grooves = 0.5 + 0.5 * np.sin(rr * 140)
+    aniso = 0.5 + 0.5 * np.cos(2 * (ang + 0.6))  # anisotropic sheen of a lathed surface
+    tone = 0.45 + 0.35 * aniso + 0.08 * grooves - 0.15 * rr
+    col = np.asarray(BRASS[0], np.float32) * (1 - tone[..., None]) + np.asarray(BRASS[1], np.float32) * tone[..., None]
+    _poly(img, out, np.clip(col, 0, 1), ink=0)
+    _poly(img, _ellipse_pts(cx, cy - ry * 0.28, rx * 0.17, ry * 0.45), _gradient(h, w, BRASS[1], BRASS[0]), ink=1.5)  # bell
+    _poly(img, [(cx - rx * 0.05, cy - ry * 0.75), (cx + rx * 0.05, cy - ry * 0.75), (cx + rx * 0.05, cy - ry * 0.55), (cx - rx * 0.05, cy - ry * 0.55)],
+          (0.25, 0.25, 0.55), ink=1.5)  # felt
+    _poly(img, _ellipse_pts(cx, cy - ry * 0.9, rx * 0.06, rx * 0.035, n=20), CHROME[1], ink=1.5)  # wing nut
+    _line(img, _ellipse_pts(cx, cy, rx, ry, 0.1, math.pi - 0.1, 60), 2.0, color=BRASS[0])  # edge
     _line(img, out, ink, closed=True)
     return img, dict(center=(cx, cy))
+
+
+def stand(dst, top, floor_y, width=6, legs=True, tilter=True):
+    """Cymbal or drum stand drawn into the frame: tube, a joint clamp, tripod legs at the floor."""
+    x, y = top
+    pole(dst, (x, y), (x + 4, floor_y - 10), width)
+    jy = y + (floor_y - y) * 0.45
+    cv2.rectangle(dst, (int(x - width * 1.2), int(jy - width)), (int(x + width * 1.2 + 2), int(jy + width)), INK, -1, cv2.LINE_AA)
+    cv2.rectangle(dst, (int(x - width), int(jy - width + 2)), (int(x + width + 2), int(jy + width - 2)), (0.7, 0.7, 0.74), -1, cv2.LINE_AA)
+    if legs:
+        for dx in (-1, 1):
+            pole(dst, (x + 4, floor_y - 40), (x + 4 + dx * 70, floor_y), max(3, width - 2))
+        pole(dst, (x + 4, floor_y - 40), (x + 14, floor_y + 4), max(3, width - 2))
+
+
+def tom_mount(dst, a, b, width=7):
+    """Chrome L-arm from the bass drum to a tom."""
+    mid = (b[0], a[1] - (a[1] - b[1]) * 0.15)
+    pole(dst, a, mid, width)
+    pole(dst, mid, b, width)
+
+
+def floor_shadow(dst, cx, y, rx, ry, k=0.5):
+    """Soft contact shadow on the stage floor."""
+    h, w = dst.shape[:2]
+    m = np.zeros((h // 4, w // 4), np.float32)
+    cv2.ellipse(m, (int(cx / 4), int(y / 4)), (max(1, int(rx / 4)), max(1, int(ry / 4))), 0, 0, 360, 1.0, -1, cv2.LINE_AA)
+    m = cv2.resize(cv2.GaussianBlur(m, (0, 0), 3), (w, h))[..., None]
+    dst *= 1 - k * m
 
 
 def stick(L=230, ink=3):
@@ -311,3 +411,31 @@ def strings(img, anc, ring, t, color=(0.85, 0.86, 0.88)):
             yk = ys + amp * env * math.sin(2 * math.pi * (55 + 9 * i) * t + ph)
             _line(out, np.stack([xs, yk], 1), 1.4 if k == 0 else 1.0, color=color)
     return out
+
+
+def strap(dst, pts, width, color=(0.10, 0.15, 0.24)):
+    """A leather guitar strap along a curve: ink edge, leather, a lighter top edge, stitching."""
+    P = _chaikin(np.asarray(pts, float), 0) if len(pts) > 2 else np.asarray(pts, float)
+    # resample a smooth curve through the points (quadratic Bezier for 3 points)
+    if len(pts) == 3:
+        t = np.linspace(0, 1, 40)[:, None]
+        a, b, c = (np.asarray(p, float) for p in pts)
+        P = (1 - t) ** 2 * a + 2 * (1 - t) * t * b + t ** 2 * c
+    Q = np.round(P * 4).astype(np.int32)
+    cv2.polylines(dst, [Q], False, INK, int(width + 6), cv2.LINE_AA, shift=2)
+    cv2.polylines(dst, [Q], False, color, int(width), cv2.LINE_AA, shift=2)
+    d = np.gradient(P, axis=0)
+    n = np.stack([-d[:, 1], d[:, 0]], 1)
+    n /= np.linalg.norm(n, axis=1, keepdims=True) + 1e-9
+    for side, col in ((-0.30, (0.30, 0.40, 0.55)), (0.30, (0.20, 0.28, 0.40))):
+        E = P + n * side * width
+        for k in range(0, len(E) - 1, 2):  # stitches: short dashes
+            cv2.line(dst, tuple(np.round(E[k] * 4).astype(int)), tuple(np.round(E[k + 1] * 4).astype(int)), col, max(1, int(width * 0.08)), cv2.LINE_AA, shift=2)
+    hl = P + n * (-0.42) * width
+    cv2.polylines(dst, [np.round(hl * 4).astype(np.int32)], False, (0.35, 0.45, 0.6), max(1, int(width * 0.06)), cv2.LINE_AA, shift=2)
+
+
+def button(dst, p, r):
+    cv2.circle(dst, (int(p[0]), int(p[1])), int(r + 2), INK, -1, cv2.LINE_AA)
+    cv2.circle(dst, (int(p[0]), int(p[1])), int(r), (0.85, 0.85, 0.88), -1, cv2.LINE_AA)
+    cv2.circle(dst, (int(p[0] - r * 0.3), int(p[1] - r * 0.3)), max(1, int(r * 0.35)), (1, 1, 1), -1, cv2.LINE_AA)

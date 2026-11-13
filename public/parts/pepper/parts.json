@@ -38,5 +38,13 @@
    1150
   ]
  },
- "arm_width": 75
+ "arm_width": 75,
+ "hand": {
+  "skin_bgr": [
+   124,
+   159,
+   220
+  ],
+  "length": 150
+ }
 }
