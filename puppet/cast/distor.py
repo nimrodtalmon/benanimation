@@ -18,6 +18,36 @@ ROOT = warp.ROOT
 FPS, W, H = warp.FPS, warp.W, warp.H
 
 
+def body_cfg(j, body_file, scale, crop_h_src):
+    """Puppet config for Distor's full-body drawing (public/parts/distor): the head landmarks of
+    warp.CHARS['distor'], shifted by the side padding of the body drawing."""
+    pad = j["pad"]
+    base = warp.CHARS["distor"]
+    sx = lambda v: v + pad  # noqa: E731
+    cfg = dict(base)
+    cfg.update(full="public/parts/distor/" + body_file, src_h=1600, height=1600 * scale, crop_h_src=crop_h_src,
+               head_ells=[(sx(x), y, rx, ry) for x, y, rx, ry in base["head_ells"]],
+               neck=(sx(base["neck"][0]), sx(base["neck"][1]), base["neck"][2], base["neck"][3]),
+               face=(sx(base["face"][0]),) + tuple(base["face"][1:]), pivot=(sx(base["pivot"][0]), base["pivot"][1]),
+               mouth=(sx(base["mouth"][0]),) + tuple(base["mouth"][1:]),
+               eyes=[(sx(x), y, rx, ry) for x, y, rx, ry in base["eyes"]], lid_color=(sx(base["lid_color"][0]), base["lid_color"][1]),
+               irises=[(sx(x), y, r) for x, y, r in base.get("irises", [])],
+               eye_hide=[(sx(x), y, rx, ry) for x, y, rx, ry in base.get("eye_hide", [])])
+    return cfg
+
+
+def arms(j, parts, **kw):
+    """Distor's two arms (Limbs): his drawn upper arm + forearm, mirrored for the other side."""
+    up = load_rgba(f"{parts}/{j['upper_arm']['file']}")
+    fo = load_rgba(f"{parts}/{j['forearm']['file']}")
+    u, f, jt = join_parts(up, fo, j["upper_arm"], j["forearm"])
+    arm_l = Limb(u, f, jt, j["arm_width"], inner=-1, **kw)  # viewer's left arm, bends toward the body
+    uf, ff = u[:, ::-1].copy(), f[:, ::-1].copy()  # mirrored copy for the other arm
+    wj = u.shape[1] - 1
+    jm = {k: [wj - v[0], v[1]] for k, v in jt.items()}
+    return arm_l, Limb(uf, ff, jm, j["arm_width"], inner=1, **kw)
+
+
 class Singer:
     PARTS = f"{ROOT}/public/parts/distor"
 
@@ -36,18 +66,7 @@ class Singer:
         self.drag = {"l": Drag(), "r": Drag()}
         self.lean = Lean()
         j = json.load(open(f"{self.PARTS}/parts.json"))
-        pad = j["pad"]
-        base = warp.CHARS["distor"]
-        sx = lambda v: v + pad  # noqa: E731
-        cfg = dict(base)
-        cfg.update(full="public/parts/distor/" + ("body_nolegs.png" if walk else "body.png"), src_h=1600, height=1600 * scale, crop_h_src=(H - top) / scale + 120,
-                   head_ells=[(sx(x), y, rx, ry) for x, y, rx, ry in base["head_ells"]],
-                   neck=(sx(base["neck"][0]), sx(base["neck"][1]), base["neck"][2], base["neck"][3]),
-                   face=(sx(base["face"][0]),) + tuple(base["face"][1:]), pivot=(sx(base["pivot"][0]), base["pivot"][1]),
-                   mouth=(sx(base["mouth"][0]),) + tuple(base["mouth"][1:]),
-                   eyes=[(sx(x), y, rx, ry) for x, y, rx, ry in base["eyes"]], lid_color=(sx(base["lid_color"][0]), base["lid_color"][1]),
-                   irises=[(sx(x), y, r) for x, y, r in base.get("irises", [])],
-                   eye_hide=[(sx(x), y, rx, ry) for x, y, rx, ry in base.get("eye_hide", [])])
+        cfg = body_cfg(j, "body_nolegs.png" if walk else "body.png", scale, (H - top) / scale + 120)
         self.p = warp.Puppet(cfg)
         self.s = scale
         self.cfg, self.j = cfg, j
@@ -77,14 +96,7 @@ class Singer:
             else:
                 self.walker = Walk(walk, stride=0.75 * leg_px, lift=0.16 * leg_px)
             self._dir = 1.0
-        up = load_rgba(f"{self.PARTS}/{j['upper_arm']['file']}")
-        fo = load_rgba(f"{self.PARTS}/{j['forearm']['file']}")
-        u, f, jt = join_parts(up, fo, j["upper_arm"], j["forearm"])
-        self.arm_l = Limb(u, f, jt, j["arm_width"], inner=-1)  # viewer's left arm, bends toward the body
-        uf, ff = u[:, ::-1].copy(), f[:, ::-1].copy()  # mirrored copy for the other arm
-        wj = u.shape[1] - 1
-        jm = {k: [wj - v[0], v[1]] for k, v in jt.items()}
-        self.arm_r = Limb(uf, ff, jm, j["arm_width"], inner=1)
+        self.arm_l, self.arm_r = arms(j, self.PARTS)
         hs = j["hand"]
         ben = handrig.Style(skin=np.array(hs["skin_bgr"]) / 255, ink=(0.075, 0.07, 0.08), ink_w=0.03, shade=0.0, flat=True)
         self.mic_hand = handrig.Hand(ben, mirror=False)  # his right hand (on the viewer's left)

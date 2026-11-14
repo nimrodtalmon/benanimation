@@ -29,24 +29,21 @@ DRUM = dict(KICK=36, SNARE=38, HAT=42, OPEN_HAT=46, CRASH=49, TOM_HI=50, TOM_MID
 
 class Drummer:
     PARTS = f"{ROOT}/public/parts/pepper"
+    upper_front = False
 
     def __init__(self, song=None, scale=0.6, cx=W / 2, top=20, empty=False, head=1.0, face=False):
         """empty=True: only the kit (before she sits down)."""
         self.song = song or Song.default()
         self.empty = empty
-        j = json.load(open(f"{self.PARTS}/parts.json"))
-        cfg = dict(PEPPER_HEAD, full="public/parts/pepper/body.png", height=1400 * scale)
-        self.p = warp.Puppet(cfg)
-        self.cfg, self.j, self.s = cfg, j, scale
-        self.x0, self.top = int(cx - 403 * scale), top
-        self.arms = {}
-        for side, inner in (("l", -1), ("r", 1)):
-            a = j[f"arm_{side}"]
-            img = load_rgba(f"{self.PARTS}/{a['file']}")
-            self.arms[side] = Limb(img, img, a, j["arm_width"], inner=inner, fold_shadow=0.2)
         s = scale
-        P = lambda x, y: (self.x0 + x * s, top + y * s)  # noqa: E731  crop coords -> screen
-        # the kit, placed in the drummer's (crop) coordinates
+        self.s = s  # kit scale: screen px per kit unit (kit units = Pepper's crop pixels)
+        self.top = top
+        self.rig(scale, cx, top)
+        # the kit is laid out in kit units around Pepper's shoulders (403, 650); rig() says where
+        # that point is on screen for this player
+        ax, ay = self.kit_anchor
+        P = lambda x, y: (ax + (x - 403) * s, ay + (y - 650) * s)  # noqa: E731  kit units -> screen
+        self.P = P
         skull = cv2.imread(f"{ROOT}/public/clip/skull.png", cv2.IMREAD_UNCHANGED)
         # an open-handed kit seen from the audience: hi-hat and snare on the viewer's right (played
         # by the near hand, no crossing), rack toms on the bass drum angled toward her, floor tom
@@ -65,9 +62,6 @@ class Drummer:
         self.tilt_deg = dict(tom_mid=9, tom_hi=-9, floor=0, snare=-3, kick=0)
         self.floor_y = P(0, 1760)[1]
         self.ao = None
-        hs = j["hand"]
-        self.hands = {"l": handrig.StickHand(hs["skin_bgr"], 1.12 * hs["length"] * s, mirror=False), "r": handrig.StickHand(hs["skin_bgr"], 1.12 * hs["length"] * s, mirror=True)}
-        self.hand_anchor = (0.0, 0.14, 0.0)  # the wrist sits deep inside the wide cuff, so the hand never pops out of a corner
         # which hand plays what: viewer's left (her right hand) = snare and toms, viewer's right = hats and crash
         piece_at = {DRUM["SNARE"]: "snare", DRUM["TOM_HI"]: "tom_hi", DRUM["TOM_MID"]: "tom_mid", DRUM["TOM_LO"]: "floor",
                     DRUM["HAT"]: "hat", DRUM["OPEN_HAT"]: "hat", DRUM["CRASH"]: "crash"}
@@ -94,6 +88,31 @@ class Drummer:
         dr = self.song.data["drums"]
         self.face = Face(self.song, accents=[d["t"] for d in dr if d["piece"] == 49],
                          hits=[d["t"] for d in dr if d["piece"] == 38 and d["vel"] >= 100], base_smile=0.1, seed=7) if face else None
+
+    def rig(self, scale, cx, top):
+        """The player: head/body puppet, arms, hands and where they sit. Sets p, cfg, j, sp (sprite
+        scale: screen px per drawing px), x0, top_body, arms, shoulders (drawing coords), hands,
+        hand_anchor and kit_anchor (screen point of kit unit (403, 650)). Pepper: the drawing IS
+        the kit-unit space."""
+        j = json.load(open(f"{self.PARTS}/parts.json"))
+        cfg = dict(PEPPER_HEAD, full="public/parts/pepper/body.png", height=1400 * scale)
+        self.p = warp.Puppet(cfg)
+        self.cfg, self.j, self.sp = cfg, j, scale
+        self.x0, self.top_body = int(cx - 403 * scale), top
+        self.kit_anchor = (self.x0 + 403 * scale, top + 650 * scale)
+        self.arms, self.shoulders = {}, {}
+        for side, inner in (("l", -1), ("r", 1)):
+            a = j[f"arm_{side}"]
+            img = load_rgba(f"{self.PARTS}/{a['file']}")
+            self.arms[side] = Limb(img, img, a, j["arm_width"], inner=inner, fold_shadow=0.2)
+            self.shoulders[side] = self.arms[side].S0
+        hs = j["hand"]
+        self.hands = {"l": handrig.StickHand(hs["skin_bgr"], 1.12 * hs["length"] * scale, mirror=False),
+                      "r": handrig.StickHand(hs["skin_bgr"], 1.12 * hs["length"] * scale, mirror=True)}
+        self.hand_anchor = (0.0, 0.14, 0.0)  # the wrist sits deep inside the wide cuff, so the hand never pops out of a corner
+
+    def head_args(self, e):
+        return dict(smile=e["smile"], brow=e["brow"])
 
     def strike_point(self, what, side):
         img, anc = self.kit[what][0]
@@ -148,14 +167,15 @@ class Drummer:
         turn, tilt, nod, blink, sway = self.motion.at(t)
         sway = sway * 35 * p.s
         e = self.face.at(t) if self.face else dict(smile=0.0, brow=0.0, mouth=0.0, squint=0.0)
-        fig = p.head_frame(turn, e["mouth"], "oh", max(blink, e["squint"]), sway, smile=e["smile"], brow=e["brow"])
+        fig = p.head_frame(turn, e["mouth"], "oh", max(blink, e["squint"]), sway, **self.head_args(e))
         th = math.radians(tilt) * p.w_bend
         px, py = p.pivot
         ox, oy = p.X - px, p.Y - py
         c, sn = np.cos(th), np.sin(th)
         fig = cv2.remap(fig, (px + c * ox + sn * oy).astype(np.float32), (py - sn * ox + c * oy - nod * p.w_bend).astype(np.float32),
                         cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-        top = self.top + bounce
+        top = self.top_body + bounce
+        sp = self.sp
         # hands: stick tips from the score; the wrist is found from the tip (hand + stick geometry), then IK
         poses = {}
         for side in ("l", "r"):
@@ -163,14 +183,14 @@ class Drummer:
             tip = tip + np.array([0, bounce * 0.5])
             L = self.arms[side]
             L.fore_k = 0.55 + 0.2 * lift  # forearms point at the kit (toward us); lifted they show more
-            S = np.array([self.x0 + L.S0[0] * s, top + L.S0[1] * s])
+            S = np.array([self.x0 + self.shoulders[side][0] * sp, top + self.shoulders[side][1] * sp])
             hd = self.hands[side]
             fore = self.prev_fore.get(side, L.a2_0)
             for _ in range(4):  # wrist for the stick-down pose ...
                 yaw, s_hand = hd.solve(ang, fore)
                 wrist = tip - hd.tip_offset(yaw, s_hand, self.hand_anchor)
                 wrist = wrist + np.array([0, -45 * s * lift])  # ... raised a little on the backstroke
-                E, Wr = L.solve(S, wrist, s)
+                E, Wr = L.solve(S, wrist, sp)
                 fore = math.atan2(Wr[1] - E[1], Wr[0] - E[0])
             self.prev_fore[side] = fore
             yaw, s_hand = hd.solve(ang_now, fore)
@@ -186,13 +206,18 @@ class Drummer:
             props.stand(frame, (x, y), min(H + 30, self.floor_y), sw)
         sx, sy = self.kit["snare"][1]
         props.stand(frame, (sx, sy + 60 * s), min(H + 30, self.floor_y), sw, tilter=False)
-        for side in ("l", "r") if not self.empty else ():
-            S, E, Wr = poses[side][:3]
-            lay, (x, y) = self.arms[side].render(S, E, Wr, s, (W, H), part="upper")
-            if lay is not None:
-                warp.over(frame, lay, x, y)
+        def uppers():
+            for side in ("l", "r") if not self.empty else ():
+                S, E, Wr = poses[side][:3]
+                lay, (x, y) = self.arms[side].render(S, E, Wr, sp, (W, H), part="upper")
+                if lay is not None:
+                    warp.over(frame, lay, x, y)
+        if not self.upper_front:
+            uppers()
         if not self.empty:
             warp.over(frame, fig, self.x0, int(top))
+        if self.upper_front:  # sleeves drawn over the body (a drawing whose jacket hides the shoulder joints)
+            uppers()
         if self.ao is None:  # the kit shades what is right behind it
             m = np.zeros((H, W, 3), np.float32)
             for what in ("floor", "tom_hi", "tom_mid", "kick", "snare"):
@@ -240,7 +265,7 @@ class Drummer:
             S, E, Wr, yaw, s_hand, loose = poses[side]
             img, xy, frac = self.hands[side].render(yaw, s_hand, loose, Wr, self.hand_anchor)
             over_sub(frame, img, xy, frac)
-            lay, (x, y) = self.arms[side].render(S, E, Wr, s, (W, H), part="fore")
+            lay, (x, y) = self.arms[side].render(S, E, Wr, sp, (W, H), part="fore")
             if lay is not None:
                 warp.over(frame, lay, x, y)
 
