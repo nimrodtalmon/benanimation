@@ -70,6 +70,10 @@ def pair(a="B", b="E"):
                     "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", f"{ROOT}/out/motiontest-{a}{b}.mp4"], check=True)
 
 
+def singer():  # for tools/jerk.py
+    return Singer(song, scale=0.25, top=50, walk=walk, fluid=True)
+
+
 if __name__ == "__main__":
     what = sys.argv[1]
     if what == "grid":

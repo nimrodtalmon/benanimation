@@ -135,6 +135,58 @@ def pepper_parts():
     json.dump(J, open(f"{out}/parts.json", "w"), indent=1)
 
 
+# ---------------------------------------------------------------- Pepper walking: legs below the skirt
+PEP_HEM = 1392  # sheet y just below the skirt hem
+PEP_LEG_J = dict(hip=(345, 1110), knee=(330, 1500), ankle=(300, 1975), sole=2042)  # sheet coords (viewer-left leg)
+
+
+def pepper_legs():
+    """Her viewer-left leg from the model sheet (the other one is covered by a head study, so the
+    right leg is its mirror), and a body without the legs (cut at the hem)."""
+    im = cv2.imread(f"{ROOT}/drawings/revoy/pepper-model-sheet.jpg")
+    X0, Y0, X1, Y1 = 150, 1050, 470, 2070
+    c = im[Y0:Y1, X0:X1].copy()
+    hh, ww = c.shape[:2]
+    light = (c.min(2) > 205).astype(np.uint8) * 255
+    mask = np.zeros((hh + 2, ww + 2), np.uint8)
+    for (x, y) in [(x, hh - 1) for x in range(ww)] + [(0, y) for y in range(hh)] + [(ww - 1, y) for y in range(hh)]:
+        if light[y, x] == 255:
+            cv2.floodFill(light, mask, (x, y), 128)
+    fg = (light != 128).astype(np.uint8)
+    fg[: PEP_HEM - Y0 + 12] = 0  # the hem's shadow line
+    fg = cv2.morphologyEx(fg, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
+    n, lab, st, _ = cv2.connectedComponentsWithStats(fg)
+    k = 1 + np.argmax(st[1:, cv2.CC_STAT_AREA])
+    fg = (lab == k).astype(np.uint8)
+    soft = np.clip((255 - c.min(2).astype(np.float32)) / 40, 0, 1)
+    a = np.maximum(cv2.erode(fg, np.ones((3, 3), np.uint8)).astype(np.float32), soft * cv2.dilate(fg, np.ones((5, 5), np.uint8)))
+    a = cv2.GaussianBlur(a, (0, 0), 0.8) * cv2.dilate(fg, np.ones((5, 5), np.uint8))
+    # fade in just under the hem (the skirt overlaps it)
+    a[: PEP_HEM - Y0 + 24] *= np.linspace(0, 1, PEP_HEM - Y0 + 24)[:, None] ** 4
+    leg = np.dstack([c, (a * 255).astype(np.uint8)])
+    # the thigh goes on under the skirt (so a swinging leg never shows its cut top)
+    r0 = PEP_HEM - Y0 + 30
+    top = PEP_LEG_J["hip"][1] - Y0 + 40
+    leg[top:r0] = leg[r0]
+    out = f"{ROOT}/public/parts/pepper"
+    cv2.imwrite(f"{out}/leg_l.png", leg)
+    cv2.imwrite(f"{out}/leg_r.png", leg[:, ::-1])
+    J = json.load(open(f"{out}/parts.json"))
+    mid = PEP_MID + 40  # sheet x of her middle
+    lj = {k: [v[0] - X0, v[1] - Y0] for k, v in PEP_LEG_J.items() if k != "sole"}
+    rj = {k: [ww - 1 - v[0], v[1]] for k, v in lj.items()}
+    J["legs"] = dict(
+        l=dict(file="leg_l.png", hip_body=[PEP_LEG_J["hip"][0] - 40, PEP_LEG_J["hip"][1] - 60], **lj),
+        r=dict(file="leg_r.png", hip_body=[2 * mid - PEP_LEG_J["hip"][0] - 40, PEP_LEG_J["hip"][1] - 60], **rj))
+    J["leg_width"] = 130
+    J["sole_y"] = PEP_LEG_J["sole"] - 60  # body (crop) coords
+    J["hem_y"] = PEP_HEM - 60
+    json.dump(J, open(f"{out}/parts.json", "w"), indent=1)
+    body = cv2.imread(f"{out}/body.png", cv2.IMREAD_UNCHANGED)
+    body[PEP_HEM - 60 + 4:, :, 3] = 0
+    cv2.imwrite(f"{out}/body_walk.png", body)
+
+
 if __name__ == "__main__":
     what = sys.argv[1] if len(sys.argv) > 1 else "all"
     if what in ("all", "cut"):
@@ -142,3 +194,5 @@ if __name__ == "__main__":
         coriander()
     if what in ("all", "parts"):
         pepper_parts()
+    if what in ("all", "parts", "legs"):
+        pepper_legs()

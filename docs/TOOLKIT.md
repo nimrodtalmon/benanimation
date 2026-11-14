@@ -122,3 +122,10 @@ timing from `song` (never from a global), so it works in any clip with any song.
 - Finish: `HandDrawn` (line boil, paper, grade). `twos=True` steps characters at 15 fps while the camera stays at 30.
 - Sources: research notes in the session (Candeland on Clint Eastwood: hold most parts, make mouth/hands/hair good; successive breaking of joints; lip sync 2 frames early).
 - Walk across the stage = 3/4 walk, not a front-view walk (a front walk while sliding sideways reads as robotic): planted feet stay put in the world, knees bend toward the travel direction (`motion.knee`), 60% stance (double support), the hips' height comes from the planted legs (`motion.walk3q`), and `Path(..., ramp=0.5)` cruises at a constant speed instead of easing over the whole move. Round the top of the thigh sprite about the hip so it does not poke out.
+
+### Walking characters and scenes before the music (clip 3, "arrival")
+- `puppet/legs.py` `Legs`: any character with two leg drawings (hip, knee, ankle in parts.json "legs") walks on a `Path`. `knee3q` lets the knee bend partly toward the camera (only half its sideways offset shows, bones foreshortened), so a standing leg is straight and a walking knee is not violent. `soft_reach(start=0.97)` stops legs snapping straight.
+- Smoothness is measured, not eyeballed: `python3 tools/jerk.py clips/<clip>/clip.py:<factory> t0 t1` prints per-point acceleration (px/frame²). A whole-body spike (same value at hips, mouth, hands) means a body-level pop; aim for under ~3 on the body, ~10 on feet.
+- `Song.shifted(pre, count_in=(t0, n), sfx=[...])`: a scene before the music (pre in whole bars keeps the beat grid), hi-hat count-in ticks added to the score (the drummer plays them) and the audio, footsteps from `legs.contacts`.
+- `Drummer(empty=True)` draws only the kit; a camera cut hides a character sitting down.
+- Pepper's legs come from her model sheet (`cutout_paint.py legs`; the right leg is the mirrored left one, a head study covers it).

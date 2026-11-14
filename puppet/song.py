@@ -34,6 +34,70 @@ class Song:
         return cls("src/song.json", "public/song/song.wav", "public/song/vocals.wav",
                    "Song: 'silence in the air' by JeffSpeed68 (ccmixter.org, CC BY-NC 3.0) + our drums")
 
+    # ---- a pre-roll (a scene before the music)
+    def shifted(self, pre, name="pre", count_in=None, sfx=()):
+        """A copy of this song that starts `pre` seconds later (pre: whole bars keeps the beat
+        grid). count_in=(t0, n): n closed hi-hat ticks one beat apart from t0, added to the score
+        (so a drummer plays them) and to the audio. sfx: [(t, "step"|"tick", gain)] extra sounds
+        (footsteps...). Audio goes to out/<name>-song.wav and out/<name>-vocals.wav."""
+        import copy
+        sr = 44100
+        new = copy.copy(self)
+        d = copy.deepcopy(self.data)
+        for key in ("drums", "vocal", "guitar"):
+            for e in d.get(key, []):
+                e["t"] += pre
+        for sec in d.get("sections", []):
+            sec["t0"] += pre
+            sec["t1"] += pre
+        d["sections"] = [dict(name="pre", t0=0.0, t1=pre)] + d.get("sections", [])
+        d["duration"] = self.duration + pre
+        sounds = list(sfx)
+        if count_in:
+            t0, n = count_in
+            for k in range(n):
+                tk = t0 + k * self.spb
+                d["drums"].append(dict(beat=None, piece=42, vel=70, t=tk))
+                sounds.append((tk, "tick", 0.9))
+        d["drums"].sort(key=lambda e: e["t"])
+        new.data, new.duration, new._drv = d, d["duration"], None
+
+        def load(path):
+            raw = subprocess.run(["ffmpeg", "-loglevel", "error", "-i", path, "-f", "f32le", "-ac", "2", "-ar", str(sr), "-"], capture_output=True).stdout
+            return np.frombuffer(raw, np.float32).reshape(-1, 2)
+
+        def save(y, path):
+            subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "f32le", "-ac", "2", "-ar", str(sr), "-i", "-", path],
+                           input=np.clip(y, -1, 1).astype(np.float32).tobytes(), check=True)
+
+        rng = np.random.default_rng(5)
+        os.makedirs(f"{ROOT}/out", exist_ok=True)
+        y = load(self.audio)
+        y = np.concatenate([np.zeros((int(pre * sr), 2), np.float32), y])
+        y[: int(pre * sr)] += 0.003 * rng.normal(size=(int(pre * sr), 2)).astype(np.float32)  # room tone
+        for (ts, kind, g) in sounds:
+            i = int(ts * sr)
+            if kind == "tick":  # closed hi-hat: bright noise, ~40 ms
+                n = int(0.05 * sr)
+                z = rng.normal(size=n)
+                z = z - np.convolve(z, np.ones(4) / 4, "same")
+                w = z * np.exp(-np.arange(n) / (0.012 * sr))
+            else:  # a footstep: a soft low thump plus a little scuff
+                n = int(0.12 * sr)
+                tt = np.arange(n) / sr
+                w = np.sin(2 * np.pi * 70 * tt) * np.exp(-tt / 0.025) + 0.15 * rng.normal(size=n) * np.exp(-tt / 0.01)
+            w = (g * 0.5 * w / (np.abs(w).max() + 1e-9)).astype(np.float32)
+            j = min(len(y), i + len(w))
+            if 0 <= i < len(y):
+                y[i:j] += w[: j - i, None]
+        new.audio = f"{ROOT}/out/{name}-song.wav"
+        save(y, new.audio)
+        if self.vocals:
+            v = load(self.vocals)
+            new.vocals = f"{ROOT}/out/{name}-vocals.wav"
+            save(np.concatenate([np.zeros((int(pre * sr), 2), np.float32), v]), new.vocals)
+        return new
+
     # ---- the voice
     def vocal_env(self):
         """Loudness of the vocal track per frame, 0..1 (fast attack, ~70 ms release)."""

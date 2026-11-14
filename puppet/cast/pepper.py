@@ -30,8 +30,10 @@ DRUM = dict(KICK=36, SNARE=38, HAT=42, OPEN_HAT=46, CRASH=49, TOM_HI=50, TOM_MID
 class Drummer:
     PARTS = f"{ROOT}/public/parts/pepper"
 
-    def __init__(self, song=None, scale=0.6, cx=W / 2, top=20):
+    def __init__(self, song=None, scale=0.6, cx=W / 2, top=20, empty=False):
+        """empty=True: only the kit (before she sits down)."""
         self.song = song or Song.default()
+        self.empty = empty
         j = json.load(open(f"{self.PARTS}/parts.json"))
         cfg = dict(PEPPER_HEAD, full="public/parts/pepper/body.png", height=1400 * scale)
         self.p = warp.Puppet(cfg)
@@ -179,12 +181,13 @@ class Drummer:
             props.stand(frame, (x, y), min(H + 30, self.floor_y), sw)
         sx, sy = self.kit["snare"][1]
         props.stand(frame, (sx, sy + 60 * s), min(H + 30, self.floor_y), sw, tilter=False)
-        for side in ("l", "r"):
+        for side in ("l", "r") if not self.empty else ():
             S, E, Wr = poses[side][:3]
             lay, (x, y) = self.arms[side].render(S, E, Wr, s, (W, H), part="upper")
             if lay is not None:
                 warp.over(frame, lay, x, y)
-        warp.over(frame, fig, self.x0, int(top))
+        if not self.empty:
+            warp.over(frame, fig, self.x0, int(top))
         if self.ao is None:  # the kit shades what is right behind it
             m = np.zeros((H, W, 3), np.float32)
             for what in ("floor", "tom_hi", "tom_mid", "kick", "snare"):
@@ -228,7 +231,7 @@ class Drummer:
             sc = 1.0 + 0.02 * hit
             anchor = anc.get("head", anc.get("center"))
             blit(frame, img, place(img, anchor, (x, y + 2 * hit), math.radians(self.tilt_deg[what]), sc))
-        for side in ("l", "r"):
+        for side in ("l", "r") if not self.empty else ():
             S, E, Wr, yaw, s_hand, loose = poses[side]
             img, xy, frac = self.hands[side].render(yaw, s_hand, loose, Wr, self.hand_anchor)
             over_sub(frame, img, xy, frac)

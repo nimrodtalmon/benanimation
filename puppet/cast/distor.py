@@ -70,7 +70,7 @@ class Singer:
             L = self.legs["l"][0]
             leg_px = (L.L1 + L.L2) * scale
             if fluid:  # 3/4 walk: planted feet carry him, knees bend the way he walks
-                self.walker = Walk(walk, stride=0.95 * leg_px, lift=0.10 * leg_px, stance=0.6, leg=leg_px, v_full=0.6 * leg_px)
+                self.walker = Walk(walk, stride=0.9 * leg_px, lift=0.07 * leg_px, stance=0.6, leg=leg_px, v_full=0.6 * leg_px)
             else:
                 self.walker = Walk(walk, stride=0.75 * leg_px, lift=0.16 * leg_px)
             self._dir = 1.0
@@ -141,11 +141,10 @@ class Singer:
             if self.fluid:
                 off = self.world(hip_body, 0)[0] - self.cx
                 foot = np.array([fx + 0.9 * off, self.world(hip_body, 0)[1] + (L.L1 + L.L2) * s - lift * self.walker.lift])
-                from motion import knee
-                E = knee(hip, foot, L.L1 * s, L.L2 * s, self._dir)
-                if np.hypot(*(foot - hip)) > 0.999 * (L.L1 + L.L2) * s:
-                    foot = hip + (foot - hip) * 0.999 * (L.L1 + L.L2) * s / np.hypot(*(foot - hip))
-                L.up_k = L.fore_k = 1.0
+                from motion import knee3q, soft_reach
+                foot = soft_reach(hip, foot, (L.L1 + L.L2) * s, start=0.97)
+                E, L.up_k, L.fore_k = knee3q(hip, foot, L.L1 * s, L.L2 * s, self._dir)
+                self.trace.update({f"hip_{side}": hip, f"knee_{side}": E, f"foot_{side}": foot})
                 lay, (x, y) = L.render(hip, E, foot, s, (W, H))
                 if lay is not None:
                     warp.over(frame, lay, x, y)
@@ -189,6 +188,7 @@ class Singer:
         return np.array([x, top])
 
     def draw(self, frame, t):
+        self.trace = {}  # key points of this frame (for smoothness checks: tools/jerk.py)
         p, cfg = self.p, self.cfg
         walk_bob, speed = 0.0, 0.0
         if self.path is not None:
@@ -251,6 +251,7 @@ class Singer:
         a = math.radians(tilt)
         R = np.array([[math.cos(a), -math.sin(a)], [math.sin(a), math.cos(a)]])
         mouth = self.X(np.array([self.x0, self.top + bob]) + np.array([px, py]) + R @ (q + [0, nod] - [px, py]))
+        self.trace.update(mouth=mouth, shoulder_l=self.X(self.world(self.j["shoulders"]["left"], bob)))
         s = self.s
         shL = self.X(self.world(self.j["shoulders"]["left"], bob))
         shR = self.X(self.world(self.j["shoulders"]["right"], bob))
@@ -269,13 +270,14 @@ class Singer:
                 A = (self.arm_r.L1 + self.arm_r.L2) * s
                 fr_ = self.walker.feet(t)[0]["r"][0]  # the arm swings forward as its own-side leg goes back
                 sw = float(np.clip(-(fr_ - self.cx) / (0.5 * self.walker.stride), -1, 1)) * gb["speed"]
-                a = math.radians(4 + 22 * sw * self._dir)
+                a = math.radians(4 + 14 * sw * self._dir)
                 free_t = shR + 0.96 * A * np.array([-math.sin(a), math.cos(a)])
             E, Wr, a2, om = self.follow["r"].at(shR, free_t, self.arm_r.L1 * s, self.arm_r.L2 * s, t, stiff=0.6 if pump else 0.0)
             drag = self.drag["r"].at(om, t)
             fa = math.degrees(a2 + drag) - 90
             curl = 0.15 + 0.1 * math.sin(t * 1.3) + 0.6 * abs(drag)
             pose = handrig.POSES["fist"] if pump else handrig.Pose.mix(handrig.POSES["relaxed"], handrig.POSES["fist"], min(0.6, curl))
+            self.trace.update(elbow_r=E, hand_r=Wr)
             img, xy, frac = self.free_hand.render(pose, handrig.orient(fa, 10, 0), self.hand_size, Wr, anchor=self.anchor)
         else:
             if self.free is None:
@@ -347,6 +349,7 @@ class Singer:
             E, Wr2, a2, om = self.follow["l"].at(shL, Wr, L.L1 * s, L.L2 * s, t, stiff=0.3 + 0.7 * u)
             Wr = Wr2
             R = handrig.orient(yaw + math.degrees(self.drag["l"].at(om, t)) * (1 - u), 0, 180)
+        self.trace.update(elbow_l=E, hand_l=Wr)
         held = [dict(q, p0=g + rot @ (np.array(q["p0"]) - g), p1=g + rot @ (np.array(q["p1"]) - g)) for q in self.mic]
         img, xy, frac = self.mic_hand.render(handrig.POSES["mic"], R, self.hand_size, Wr, anchor=self.anchor, held=held)
         over_sub(frame, img, xy, frac)

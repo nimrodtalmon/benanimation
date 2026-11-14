@@ -187,7 +187,7 @@ class HandDrawn:
 
 class Production:
     def __init__(self, song, cast, shots, name, crowd_in=(), zoom_wide=(1.04, 1.0), zoom=(1.0, 1.05), script=None, cue=None,
-                 look=None, twos=False):
+                 look=None, twos=False, crowd_wide=True):
         """look: a HandDrawn finish (or None); twos: characters move on twos (15 drawings a second,
         the camera and lights stay smooth), the cadence of hand-drawn 2D."""
         self.song, self.cast_f, self.shots, self.name = song, cast, shots, name
@@ -195,7 +195,7 @@ class Production:
         self.zoom_wide, self.zoom = zoom_wide, zoom
         self.script = script
         self.cue = cue  # cue(t, shot) -> Stage cue dict (lights per moment and shot)
-        self.look, self.twos = look, twos
+        self.look, self.twos, self.crowd_wide = look, twos, crowd_wide
         self.cast = {}
         self.stage = Stage(song)
 
@@ -224,7 +224,7 @@ class Production:
             if hasattr(w, "advance"):
                 w.advance(fc)
             w.draw(frame, tc)
-        if wide or shot in self.crowd_in:
+        if (wide and self.crowd_wide) or shot in self.crowd_in:
             crowd(frame, t, self.song.spb)
         frame = stage_light(frame, t)
         if self.look is not None:
@@ -288,8 +288,10 @@ class Production:
 
     def main(self, argv):
         what = argv[1] if len(argv) > 1 else "video"
-        if what == "segment":
-            self.render(float(argv[2]), float(argv[3]), argv[4])
+        if what == "segment":  # segment t0 t1 [out] -> with audio
+            t0, t1 = float(argv[2]), float(argv[3])
+            out = argv[4] if len(argv) > 4 else f"{ROOT}/out/{self.name}-{argv[2]}-{argv[3]}.mp4"
+            print(self.render_range(t0, t1, out))
         elif what == "stills":
             self.stills([float(a) for a in argv[2:]], f"{ROOT}/out/{self.name}-still")
         elif what == "video":

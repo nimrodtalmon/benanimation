@@ -188,7 +188,7 @@ class Walk:
                 w = (fr - st) / (1 - st)
                 e = w * w * (3 - 2 * w)
                 fx = plant(n) + (plant(n + 1) - plant(n)) * e
-                lift = math.sin(math.pi * w ** 0.8)
+                lift = 0.5 * (1 - math.cos(2 * math.pi * w)) * (1 - 0.25 * w)  # eases in and out (no pop)
             # standing still: feet settle under the hips
             out[side] = (x + (fx - x) * sp, lift * sp)
         bob = self.bob * sp * abs(math.sin(2 * math.pi * d / self.stride))
@@ -261,24 +261,48 @@ def gait_body(walk, t):
     sp = min(1.0, abs(walk.path.v(t)) / walk.v_full)
     u = x / walk.stride
     leg = walk.leg or walk.lift / 0.16  # front walk: built with lift = 0.16 x leg length
-    sway = -0.045 * leg * math.sin(2 * math.pi * u) * sp
+    sway = -0.03 * leg * math.sin(2 * math.pi * u) * sp
     bob = 0.028 * leg * math.cos(4 * math.pi * (u - 0.06)) * sp
-    hip = math.radians(3.0) * math.sin(2 * math.pi * u) * sp
+    hip = math.radians(2.0) * math.sin(2 * math.pi * u) * sp
     return dict(sway_px=sway, bob_px=bob, hip_tilt=hip, shoulder_tilt=-0.6 * hip, speed=sp)
 
 
-def walk3q(walk, t, hips):
-    """3/4 walk support: how far the hips must drop so every planted leg reaches its foot
-    (lowest at double support, highest at passing: the bob comes from the legs, not a sine).
-      hips: {"l": hip_x, "r": hip_x} on screen. Returns drop_px (>= 0)."""
-    feet, _, sp = walk.feet(t)
+def walk3q(walk, t, hips=None):
+    """3/4 walk support: how far the hips drop. Lowest just after each contact (double support),
+    highest at passing. The depth is what the legs need at double support (both feet half a
+    stance apart), but the curve itself is a smooth cosine: computing it from the planted feet
+    directly made the body jolt when a foot lifted off. Returns drop_px (>= 0)."""
+    sp = min(1.0, abs(walk.path.v(t)) / walk.v_full)
     reach = 0.985 * walk.leg
-    h = reach
-    for side, (fx, lift) in feet.items():
-        if lift < 0.02:
-            dx = min(abs(fx - hips[side]), 0.9 * reach)
-            h = min(h, math.sqrt(reach * reach - dx * dx))
-    return reach - h
+    dx = 0.5 * walk.stance * walk.stride
+    depth = reach - math.sqrt(max(reach * reach - dx * dx, 0.0))
+    u = walk.path.x(t) / walk.stride
+    return depth * sp * 0.5 * (1 + math.cos(4 * math.pi * (u - 0.05)))
+
+
+def knee3q(hip, foot, a, b, toward, depth=0.5):
+    """Knee for a 3/4 view: the knee bends forward, which is partly toward the camera, so only
+    `depth` of its sideways offset shows; the bones get foreshortened to match.
+    Returns E, up_k, fore_k (lengths relative to a and b)."""
+    hip, foot = np.asarray(hip, float), np.asarray(foot, float)
+    Ek = knee(hip, foot, a, b, toward)
+    v = foot - hip
+    u = v / max(np.hypot(*v), 1e-6)
+    base = hip + u * float(np.dot(Ek - hip, u))
+    E = base + depth * (Ek - base)
+    return E, float(np.hypot(*(E - hip)) / a), float(np.hypot(*(foot - E)) / b)
+
+
+def soft_reach(hip, foot, L, start=0.94):
+    """Soft IK: the foot target is pulled in smoothly near full extension so a leg never snaps
+    straight (the knee position is very sensitive there)."""
+    v = np.asarray(foot, float) - hip
+    d = float(np.hypot(*v))
+    da = start * L
+    if d <= da:
+        return np.asarray(foot, float)
+    ds = da + (L - da) * (1 - math.exp(-(d - da) / (L - da)))
+    return hip + v * (ds / d)
 
 
 def knee(hip, foot, a, b, toward):
