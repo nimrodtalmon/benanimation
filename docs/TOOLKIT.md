@@ -121,3 +121,4 @@ timing from `song` (never from a global), so it works in any clip with any song.
 - Face: mouth shapes lead the audio by 2 frames; head accents land 0.1 s early; the head drifts a little during holds.
 - Finish: `HandDrawn` (line boil, paper, grade). `twos=True` steps characters at 15 fps while the camera stays at 30.
 - Sources: research notes in the session (Candeland on Clint Eastwood: hold most parts, make mouth/hands/hair good; successive breaking of joints; lip sync 2 frames early).
+- Walk across the stage = 3/4 walk, not a front-view walk (a front walk while sliding sideways reads as robotic): planted feet stay put in the world, knees bend toward the travel direction (`motion.knee`), 60% stance (double support), the hips' height comes from the planted legs (`motion.walk3q`), and `Path(..., ramp=0.5)` cruises at a constant speed instead of easing over the whole move. Round the top of the thigh sprite about the hip so it does not poke out.

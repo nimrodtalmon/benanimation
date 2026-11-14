@@ -24,7 +24,7 @@ from song import Song  # noqa: E402
 
 song = Song.default()
 T0, T1 = 6.6, 14.2  # walk 6.8-9.4, stop, the line starts ~10.2
-walk = Path([(0, 380), (6.8, 380), (9.4, 1010)])
+walk = Path([(0, 380), (6.8, 380), (9.4, 1010)], ramp=0.5)
 OPTS = {
     "A": dict(fluid=False, look=None, twos=False),
     "B": dict(fluid=True, look=None, twos=False),

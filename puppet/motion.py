@@ -125,8 +125,10 @@ def decay_since(t, times, tau):
 class Path:
     """A position over time from keyframes [(t, x), ...]: holds between keys, eased moves (no jumps)."""
 
-    def __init__(self, keys):
-        self.keys = sorted(keys)
+    def __init__(self, keys, ramp=None):
+        """ramp=None: smoothstep over each move. ramp=seconds: walking profile, i.e. speed up over
+        `ramp`, cruise at a constant speed, slow down over `ramp` (real walks cruise)."""
+        self.keys, self.ramp = sorted(keys), ramp
 
     def x(self, t):
         k = self.keys
@@ -134,8 +136,19 @@ class Path:
             return float(k[0][1])
         for (t0, x0), (t1, x1) in zip(k[:-1], k[1:]):
             if t <= t1:
-                u = (t - t0) / max(1e-6, t1 - t0)
-                e = u * u * (3 - 2 * u)
+                T, tau = max(1e-6, t1 - t0), t - t0
+                if self.ramp is None:
+                    u = tau / T
+                    e = u * u * (3 - 2 * u)
+                else:
+                    r = min(self.ramp, T / 2)
+                    vm = 1.0 / (T - r)  # fraction of the move per second while cruising
+                    if tau < r:
+                        e = 0.5 * vm * tau * tau / r
+                    elif tau > T - r:
+                        e = 1.0 - 0.5 * vm * (T - tau) ** 2 / r
+                    else:
+                        e = 0.5 * vm * r + vm * (tau - r)
                 return float(x0 + (x1 - x0) * e)
         return float(k[-1][1])
 
@@ -151,8 +164,10 @@ class Walk:
       walk = Walk(path, stride_px, lift_px)
       walk.feet(t) -> {"l": (foot_x, lift), "r": ...}, bob_px, speed (0..1)"""
 
-    def __init__(self, path, stride, lift, bob=None, v_full=None):
-        self.path, self.stride, self.lift = path, stride, lift
+    def __init__(self, path, stride, lift, bob=None, v_full=None, stance=0.5, leg=None):
+        """stance: fraction of the cycle a foot is on the floor (0.5 cut-out style; ~0.6 real walk,
+        which gives double support). leg: leg length in px (for walk3q)."""
+        self.path, self.stride, self.lift, self.stance, self.leg = path, stride, lift, stance, leg
         self.bob = bob if bob is not None else 0.12 * lift
         self.v_full = v_full or 1.6 * stride  # px/s that counts as a full walk
 
@@ -160,19 +175,20 @@ class Walk:
         x = self.path.x(t)
         sp = min(1.0, abs(self.path.v(t)) / self.v_full)
         d = x  # distance along the (horizontal) path
+        st = self.stance
         out = {}
         for side, off in (("l", 0.0), ("r", 0.5)):
             u = d / self.stride + off
             n = math.floor(u)
             fr = u - n
-            plant = lambda m: (m + 0.25 - off) * self.stride  # noqa: E731  foot spot (distance) for step m
-            if fr < 0.5:  # stance: foot on the floor
+            plant = lambda m: (m + st / 2 - off) * self.stride  # noqa: E731  foot spot: under the body mid-stance
+            if fr < st:  # stance: foot on the floor
                 fx, lift = plant(n), 0.0
-            else:  # swing to the next spot
-                w = (fr - 0.5) / 0.5
+            else:  # swing to the next spot: heel up behind first, then reach forward
+                w = (fr - st) / (1 - st)
                 e = w * w * (3 - 2 * w)
                 fx = plant(n) + (plant(n + 1) - plant(n)) * e
-                lift = math.sin(math.pi * w)
+                lift = math.sin(math.pi * w ** 0.8)
             # standing still: feet settle under the hips
             out[side] = (x + (fx - x) * sp, lift * sp)
         bob = self.bob * sp * abs(math.sin(2 * math.pi * d / self.stride))
@@ -244,11 +260,40 @@ def gait_body(walk, t):
     x = walk.path.x(t)
     sp = min(1.0, abs(walk.path.v(t)) / walk.v_full)
     u = x / walk.stride
-    leg = walk.lift / 0.16  # the walk was built with lift = 0.16 x leg length
+    leg = walk.leg or walk.lift / 0.16  # front walk: built with lift = 0.16 x leg length
     sway = -0.045 * leg * math.sin(2 * math.pi * u) * sp
     bob = 0.028 * leg * math.cos(4 * math.pi * (u - 0.06)) * sp
     hip = math.radians(3.0) * math.sin(2 * math.pi * u) * sp
     return dict(sway_px=sway, bob_px=bob, hip_tilt=hip, shoulder_tilt=-0.6 * hip, speed=sp)
+
+
+def walk3q(walk, t, hips):
+    """3/4 walk support: how far the hips must drop so every planted leg reaches its foot
+    (lowest at double support, highest at passing: the bob comes from the legs, not a sine).
+      hips: {"l": hip_x, "r": hip_x} on screen. Returns drop_px (>= 0)."""
+    feet, _, sp = walk.feet(t)
+    reach = 0.985 * walk.leg
+    h = reach
+    for side, (fx, lift) in feet.items():
+        if lift < 0.02:
+            dx = min(abs(fx - hips[side]), 0.9 * reach)
+            h = min(h, math.sqrt(reach * reach - dx * dx))
+    return reach - h
+
+
+def knee(hip, foot, a, b, toward):
+    """Two-bone IK in the screen plane: knee for thigh a and shin b, bent toward `toward` (+1 = +x)."""
+    v = np.asarray(foot, float) - hip
+    d = min(max(np.hypot(*v), 1e-3), 0.999 * (a + b))
+    ca = (a * a + d * d - b * b) / (2 * a * d)
+    A = math.acos(max(-1.0, min(1.0, ca)))
+    u = v / max(np.hypot(*v), 1e-6)
+    for sgn in (1, -1):
+        c, s_ = math.cos(sgn * A), math.sin(sgn * A)
+        k = hip + a * np.array([c * u[0] - s_ * u[1], s_ * u[0] + c * u[1]])
+        if (k[0] - (hip[0] + foot[0]) / 2) * toward >= 0:
+            return k
+    return k
 
 
 class Lean:

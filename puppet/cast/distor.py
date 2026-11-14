@@ -58,11 +58,22 @@ class Singer:
             for side in ("l", "r"):
                 lj = j["legs"][side]
                 img = load_rgba(f"{self.PARTS}/{lj['file']}")
+                if fluid:  # round the top of the thigh about the hip joint (no corners poking out when it swings)
+                    img = img.copy()
+                    hy, hx = lj["hip"][1], lj["hip"][0]
+                    yy, xx = np.mgrid[0:hy, 0:img.shape[1]]
+                    r = np.hypot(xx - hx, yy - hy)
+                    keep = np.clip((0.56 * j["leg_width"] - r) / 12.0 + 0.5, 0, 1)
+                    img[:hy, :, 3] = (img[:hy, :, 3] * keep).astype(img.dtype)
                 jj = dict(shoulder=lj["hip"], elbow=lj["knee"], wrist=lj["ankle"])
                 self.legs[side] = (Limb(img, img, jj, j["leg_width"], inner=1 if side == "l" else -1, fold_shadow=0.0), lj["hip_body"])
             L = self.legs["l"][0]
             leg_px = (L.L1 + L.L2) * scale
-            self.walker = Walk(walk, stride=0.75 * leg_px, lift=0.16 * leg_px)
+            if fluid:  # 3/4 walk: planted feet carry him, knees bend the way he walks
+                self.walker = Walk(walk, stride=0.95 * leg_px, lift=0.10 * leg_px, stance=0.6, leg=leg_px, v_full=0.6 * leg_px)
+            else:
+                self.walker = Walk(walk, stride=0.75 * leg_px, lift=0.16 * leg_px)
+            self._dir = 1.0
         up = load_rgba(f"{self.PARTS}/{j['upper_arm']['file']}")
         fo = load_rgba(f"{self.PARTS}/{j['forearm']['file']}")
         u, f, jt = join_parts(up, fo, j["upper_arm"], j["forearm"])
@@ -127,6 +138,18 @@ class Singer:
             L, hip_body = self.legs[side]
             hip = self.X(self.world(hip_body, bob), hips=True)
             fx, lift = feet[side]
+            if self.fluid:
+                off = self.world(hip_body, 0)[0] - self.cx
+                foot = np.array([fx + 0.9 * off, self.world(hip_body, 0)[1] + (L.L1 + L.L2) * s - lift * self.walker.lift])
+                from motion import knee
+                E = knee(hip, foot, L.L1 * s, L.L2 * s, self._dir)
+                if np.hypot(*(foot - hip)) > 0.999 * (L.L1 + L.L2) * s:
+                    foot = hip + (foot - hip) * 0.999 * (L.L1 + L.L2) * s / np.hypot(*(foot - hip))
+                L.up_k = L.fore_k = 1.0
+                lay, (x, y) = L.render(hip, E, foot, s, (W, H))
+                if lay is not None:
+                    warp.over(frame, lay, x, y)
+                continue
             # front view: the foot's travel along the walk is mostly toward/away from the camera, so
             # only a quarter of it shows sideways; the lift shows as a raised, shortened leg
             fx = 0.25 * (fx - self.cx) + hip[0]
@@ -178,6 +201,12 @@ class Singer:
         if self.fluid and self.path is not None:
             from motion import gait_body
             gb = gait_body(self.walker, t)
+            from motion import walk3q
+            v = self.path.v(t)
+            if abs(v) > 5:
+                self._dir = float(np.sign(v))
+            hips = {k: self.cx + 0.9 * (self.world(hb, 0)[0] - self.cx) + gb["sway_px"] for k, (_, hb) in self.legs.items()}
+            gb["bob_px"] = walk3q(self.walker, t, hips)
             lean = self.lean.at(self.path.v(t) / max(self.s, 1e-3) * 0.245, t)
         f = min(int(t * FPS), len(self.env) - 1)
         fm = min(f + 2, len(self.env) - 1) if self.fluid else f  # mouth shapes lead the audio by 2 frames
@@ -238,8 +267,10 @@ class Singer:
         if self.fluid:
             if self.path is not None:  # front view: a forward swing lifts the hand toward us and in
                 A = (self.arm_r.L1 + self.arm_r.L2) * s
-                fwd = math.sin(2 * math.pi * self.path.x(t) / self.walker.stride) * gb["speed"]
-                free_t = shR + np.array([-60, 980]) * s + np.array([-0.07 * A * fwd, -0.09 * A * max(fwd, 0) - 0.04 * A * max(-fwd, 0)])
+                fr_ = self.walker.feet(t)[0]["r"][0]  # the arm swings forward as its own-side leg goes back
+                sw = float(np.clip(-(fr_ - self.cx) / (0.5 * self.walker.stride), -1, 1)) * gb["speed"]
+                a = math.radians(4 + 22 * sw * self._dir)
+                free_t = shR + 0.96 * A * np.array([-math.sin(a), math.cos(a)])
             E, Wr, a2, om = self.follow["r"].at(shR, free_t, self.arm_r.L1 * s, self.arm_r.L2 * s, t, stiff=0.6 if pump else 0.0)
             drag = self.drag["r"].at(om, t)
             fa = math.degrees(a2 + drag) - 90
@@ -284,8 +315,9 @@ class Singer:
         head_dn = mouth + np.array([-2.0 * mw, 5.0 * mw])
         if self.fluid and self.path is not None:  # the mic hand swings too while he walks
             A = (self.arm_l.L1 + self.arm_l.L2) * s
-            fwd = -math.sin(2 * math.pi * self.path.x(t) / self.walker.stride) * gb["speed"]
-            head_dn = head_dn + np.array([0.15 * A * fwd, -0.18 * A * max(fwd, 0)])
+            fl_ = self.walker.feet(t)[0]["l"][0]
+            fwd = float(np.clip(-(fl_ - self.cx) / (0.5 * self.walker.stride), -1, 1)) * gb["speed"] * self._dir
+            head_dn = head_dn + np.array([0.10 * A * fwd, -0.06 * A * abs(fwd)])
         head = head_dn * (1 - u) + head_up * u
         if self.stand_cfg:  # just after the grab: the mic comes from the stand
             k = float(np.clip((t - self.stand_cfg["grab"]) / 0.6, 0, 1))
