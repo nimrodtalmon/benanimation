@@ -13,10 +13,12 @@ Read this first in a new session, then `docs/TOOLKIT.md` (pipeline + lessons).
 - Motion: fluid mode (`Singer(fluid=True)`), the 3/4 walk, calm heads; the line boil only a little (HandDrawn default boil 0.4).
 - From round 1 of the style reel: the TV-static look (style 6: night sky, light from the ground, `TVStatic`) and the camera moves.
 - He wants faces with expressions for the drummer and guitarist (`face=True`, `motion.Face`): round 2 tests them.
-- Pending: his pick from round 2 (`out/stylereel2.mp4`), then the full song in that style.
+- Round 2 pick (Nov 14): liked C (colored stage lights), D (worn-tape TV: color bleed, scan lines) and E (one cut per bar),
+  with a bit more camera movement than E. So the chosen style = colored stage + `TVStatic(0.14, vhs=0.8)` + faces +
+  Clint Eastwood camera (drift ~0.06-0.07, parallax 0.55, ghost 0.35) + bar cuts (`BAR_CUTS` style shot list).
 
 ## Next steps
-1. Render the full band song (clip 1's story) in the chosen round-2 style (copy `clips/stylereel` settings into `clips/silence` or a new clip).
+1. Render the full band song (clip 1's story) in the chosen style (C + D + E, a bit more camera): a new clip, e.g. `clips/band2`, built from the `clips/stylereel` settings.
 2. Ben's new pages (app: talmonlab.bgu.ac.il/ben/): head and body turned halfway (3/4) for walking; when they arrive, add a 3/4 body to `Singer` for walks.
 3. Clint Eastwood ideas not done yet: repeat short bits forward/backward on the beat ("rock and roll"), freeze frames with titles,
    a camera "ladder" over the song (`Production(drift=lambda t: ...)`), smears on drum hits.
