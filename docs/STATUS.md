@@ -8,6 +8,8 @@ Read this first in a new session, then `docs/TOOLKIT.md` (pipeline + lessons).
 - `clips/arrival` (clip 3): Distor and Pepper walk in, a cut hides her sitting down, hi-hat count-in, the band.
 - `clips/motiontest`: walk + one sung line, options A-E (motion study).
 - `clips/band2` (clip 4): clip 1's story in the chosen style (C + D + E, a bit more camera: drift 0.065, crash kicks 0.035, roll 0.5).
+- `clips/distorted` (clip 5): Ben's band Distorted Reality plays their own song (instrumental, recorded by the band; `public/songs/dr1`).
+  Distor on drums (`cast/distor_drums.py`), the blonde on guitar and the boy from the band page on bass (`cast/bust_player.py`).
 - `clips/stylereel`: the same 10 s of the band (song 18-28 s) in many styles; round 1 = styles 1-7, round 2 = A-E (11-15).
 
 ## What Nimrod liked / decided
@@ -17,6 +19,17 @@ Read this first in a new session, then `docs/TOOLKIT.md` (pipeline + lessons).
 - Round 2 pick (Nov 14): liked C (colored stage lights), D (worn-tape TV: color bleed, scan lines) and E (one cut per bar),
   with a bit more camera movement than E. So the chosen style = colored stage + `TVStatic(0.14, vhs=0.8)` + faces +
   Clint Eastwood camera (drift ~0.06-0.07, parallax 0.55, ghost 0.35) + bar cuts (`BAR_CUTS` style shot list).
+
+## New toolkit pieces (Nov 14)
+- `puppet/transcribe.py`: a band recording + Demucs stems -> score (drum hits per band, bass/guitar notes, chords, beats, sections).
+  Check by eye with `tools/score_plot.py`.
+- `puppet/photo.py`: phone photo of a page -> even light (paper-only background estimate), figure cut by flood fill.
+- `puppet/build_bust.py`: a bust drawing -> puppet body (jacket/hoodie continued past the page, glare removed, stand-in arms).
+- `cast/pepper.py` Drummer has a `rig()` hook: any character can sit at the kit (kit units around the shoulders).
+
+## Feedback (Nov 14)
+- band2: TV effect too much (keep as a dial: `TVStatic(amount, vhs)`); drummer hand looked detached -> fixed (hand sits in the cuff).
+- Ben's band: Distor = drummer, blonde = guitarist (sings most in songs with vocals; all of them sing), bassist = left boys of the band page.
 
 ## Next steps
 1. Done (Nov 14): `clips/band2`, full song in the chosen style; waiting for Nimrod's feedback.
