@@ -7,6 +7,7 @@ Read this first in a new session, then `docs/TOOLKIT.md` (pipeline + lessons).
 - `clips/soundcheck` (clip 2): Distor walks in, takes the mic.
 - `clips/arrival` (clip 3): Distor and Pepper walk in, a cut hides her sitting down, hi-hat count-in, the band.
 - `clips/motiontest`: walk + one sung line, options A-E (motion study).
+- `clips/band2` (clip 4): clip 1's story in the chosen style (C + D + E, a bit more camera: drift 0.065, crash kicks 0.035, roll 0.5).
 - `clips/stylereel`: the same 10 s of the band (song 18-28 s) in many styles; round 1 = styles 1-7, round 2 = A-E (11-15).
 
 ## What Nimrod liked / decided
@@ -18,7 +19,7 @@ Read this first in a new session, then `docs/TOOLKIT.md` (pipeline + lessons).
   Clint Eastwood camera (drift ~0.06-0.07, parallax 0.55, ghost 0.35) + bar cuts (`BAR_CUTS` style shot list).
 
 ## Next steps
-1. Render the full band song (clip 1's story) in the chosen style (C + D + E, a bit more camera): a new clip, e.g. `clips/band2`, built from the `clips/stylereel` settings.
+1. Done (Nov 14): `clips/band2`, full song in the chosen style; waiting for Nimrod's feedback.
 2. Ben's new pages (app: talmonlab.bgu.ac.il/ben/): head and body turned halfway (3/4) for walking; when they arrive, add a 3/4 body to `Singer` for walks.
 3. Clint Eastwood ideas not done yet: repeat short bits forward/backward on the beat ("rock and roll"), freeze frames with titles,
    a camera "ladder" over the song (`Production(drift=lambda t: ...)`), smears on drum hits.
