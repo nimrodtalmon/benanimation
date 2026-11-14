@@ -129,3 +129,14 @@ timing from `song` (never from a global), so it works in any clip with any song.
 - `Song.shifted(pre, count_in=(t0, n), sfx=[...])`: a scene before the music (pre in whole bars keeps the beat grid), hi-hat count-in ticks added to the score (the drummer plays them) and the audio, footsteps from `legs.contacts`.
 - `Drummer(empty=True)` draws only the kit; a camera cut hides a character sitting down.
 - Pepper's legs come from her model sheet (`cutout_paint.py legs`; the right leg is the mirrored left one, a head study covers it).
+
+### Lessons from Clint Eastwood (Gorillaz, 2001), measured from the video
+- 133 shots in 4:27, median 1.2 s; the calm opening uses 3-6 s shots, action uses 0.2-0.5 s flash cuts.
+- Singing shots: the body is held; the head moves as one slow, *constant-speed* drift (2-D: ~7% of the
+  frame width in 5.7 s, almost no vertical bob, never stops within the shot). In a close-up 76% of the
+  frames have no head motion at all: only the mouth (on twos, big distinct shapes) and a blink.
+- Drumming: the body is held, sticks are fast with smears (several stick images on a hit), cymbals wobble.
+- Running: on twos with blended in-betweens (two drawings overlapped, semi-transparent).
+- Editing: short loops repeated and played forward/backward, freeze frames for titles.
+- In the toolkit: `Production(drift=0.05, parallax=0.55, ghost=0.35)` (constant camera drift per shot,
+  back wall moving less than the band, frame blending on fast motion); `Singer(head=0.6, mouth_twos=True)`.

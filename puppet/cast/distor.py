@@ -21,13 +21,16 @@ FPS, W, H = warp.FPS, warp.W, warp.H
 class Singer:
     PARTS = f"{ROOT}/public/parts/distor"
 
-    def __init__(self, song=None, scale=0.5, cx=W / 2, top=60, walk=None, stand=None, pump_after=20.0, fluid=False):
+    def __init__(self, song=None, scale=0.5, cx=W / 2, top=60, walk=None, stand=None, pump_after=20.0, fluid=False, head=1.0, mouth_twos=False):
         """walk: a motion.Path of his center x on screen (he walks; separate legs). stand: dict(x, grab)
         - a mic stand at screen x; the mic is on it until time `grab`, when he takes it.
         pump_after: from this time the free arm pumps on beats 1 and 3 while singing.
-        fluid: weight shift, overlapping arms (follow-through), hand drag, lean and settle."""
+        fluid: weight shift, overlapping arms (follow-through), hand drag, lean and settle.
+        head: how much the head moves (1 = default; Clint Eastwood holds the head almost still).
+        mouth_twos: mouth shapes change every second frame (drawn-animation lip sync)."""
         self.song = song or Song.default()
         self.path, self.stand_cfg, self.pump_after, self.fluid = walk, stand, pump_after, fluid
+        self.mouth_twos = mouth_twos
         from motion import ArmFollow, Drag, Lean
         self.follow = {"l": ArmFollow(bend=1.0), "r": ArmFollow(bend=-1.0)}
         self.drag = {"l": Drag(), "r": Drag()}
@@ -102,7 +105,7 @@ class Singer:
         if fluid:  # head accents land a few frames before the stressed syllable
             acc = [(ta - 0.1, a) for ta, a in acc]
         self.settle = Spring(0.0, omega=7.0, zeta=0.4)  # lags walking speed: dip + overshoot at a stop
-        self.motion = HeadMotion(1, acc, self.song.duration, self.song.spb, turn_amp=0.5, tilt_amp=3.0, nod_px=6 * scale / 0.5)
+        self.motion = HeadMotion(1, acc, self.song.duration, self.song.spb, turn_amp=0.5 * head, tilt_amp=3.0 * head, nod_px=6 * scale / 0.5 * head)
         self.up = Spring(0.0, omega=5.0)
         self.free = None
         self.prev_turn = 0.0
@@ -210,6 +213,8 @@ class Singer:
             lean = self.lean.at(self.path.v(t) / max(self.s, 1e-3) * 0.245, t)
         f = min(int(t * FPS), len(self.env) - 1)
         fm = min(f + 2, len(self.env) - 1) if self.fluid else f  # mouth shapes lead the audio by 2 frames
+        if self.mouth_twos:
+            fm -= fm % 2
         if self.fluid and self.path is not None:  # stopping: the body sinks, overshoots, settles
             gb["bob_px"] += 0.04 * self.walker.stride / 0.75 * float(self.settle.at(gb["speed"], t) - gb["speed"])
         ph = (t % self.song.spb) / self.song.spb

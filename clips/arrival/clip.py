@@ -41,13 +41,13 @@ def make_song():
 song = make_song()
 
 CAST = {
-    "dis_wide": lambda: Singer(song, scale=D_SCALE, top=D_TOP, walk=d_walk, stand=STAND, fluid=True),
+    "dis_wide": lambda: Singer(song, scale=D_SCALE, top=D_TOP, walk=d_walk, stand=STAND, fluid=True, head=0.6, mouth_twos=True),
     "pep_walk": lambda: PepperWalk(song, scale=P_SCALE, path=p_walk, floor_y=FLOOR - 30),
     "kit": lambda: Drummer(song, scale=P_SCALE, cx=KIT_X, top=KIT_TOP, empty=True),
     "drums_wide": lambda: Drummer(song, scale=P_SCALE, cx=KIT_X, top=KIT_TOP),
     "drummer": lambda: Drummer(song),
-    "singer": lambda: Singer(song, fluid=True),
-    "singer_close": lambda: Singer(song, scale=0.62, top=-10, fluid=True),
+    "singer": lambda: Singer(song, fluid=True, head=0.6, mouth_twos=True),
+    "singer_close": lambda: Singer(song, scale=0.62, top=-10, fluid=True, head=0.6, mouth_twos=True),
 }
 WALK_IN = ("pep_walk", "kit", "dis_wide")
 BAND = ("drums_wide", "dis_wide")
@@ -82,8 +82,10 @@ def dis():
     return CAST["dis_wide"]()
 
 
+# the camera as in Clint Eastwood: a slow constant drift in every shot, the back wall moving less
+# than the band (parallax), frame blending on fast motion (sticks)
 prod = Production(song, CAST, SHOTS, name="arrival", script=os.path.abspath(__file__), cue=cue,
-                  look=HandDrawn(), crowd_wide=False)
+                  look=HandDrawn(), crowd_wide=False, drift=0.05, parallax=0.55, ghost=0.35)
 
 if __name__ == "__main__":
     prod.main(sys.argv)

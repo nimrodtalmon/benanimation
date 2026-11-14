@@ -187,7 +187,7 @@ class HandDrawn:
 
 class Production:
     def __init__(self, song, cast, shots, name, crowd_in=(), zoom_wide=(1.04, 1.0), zoom=(1.0, 1.05), script=None, cue=None,
-                 look=None, twos=False, crowd_wide=True):
+                 look=None, twos=False, crowd_wide=True, drift=0.0, parallax=None, ghost=0.0):
         """look: a HandDrawn finish (or None); twos: characters move on twos (15 drawings a second,
         the camera and lights stay smooth), the cadence of hand-drawn 2D."""
         self.song, self.cast_f, self.shots, self.name = song, cast, shots, name
@@ -196,6 +196,12 @@ class Production:
         self.script = script
         self.cue = cue  # cue(t, shot) -> Stage cue dict (lights per moment and shot)
         self.look, self.twos, self.crowd_wide = look, twos, crowd_wide
+        # Gorillaz-style camera (see docs/TOOLKIT.md): drift = a slow, constant sideways camera move
+        # in every shot (fraction of the frame width per shot, alternating direction); parallax = how
+        # much the back wall follows the camera (0.6: it moves 60% as much as the characters, the
+        # floor blends to 1.0); ghost = frame blending on fast motion (a trail of the previous frame)
+        self.drift, self.parallax, self.ghost = drift, parallax, ghost
+        self._prev = None
         self.cast = {}
         self.stage = Stage(song)
 
@@ -218,6 +224,19 @@ class Production:
         a, b, shot, opts = self.shot_at(t)
         wide = isinstance(shot, (tuple, list))
         frame = self.stage.frame(t, wide, self.cue(t, shot) if self.cue else None)
+        k = (t - a) / (b - a)
+        zoom = opts.get("zoom", self.zoom_wide if wide else self.zoom)
+        focus = opts.get("focus", (W / 2, H * 0.42))
+        if callable(focus):
+            focus = focus(t)
+        drift = opts.get("drift", self.drift)
+        if drift:
+            i = next(j for j, sh in enumerate(self.shots) if sh[0] <= t < sh[1])
+            focus = (focus[0] + (k - 0.5) * drift * W * (1 if i % 2 == 0 else -1), focus[1])
+            zoom = (zoom[0] + drift, zoom[1] + drift)  # room for the move
+        z = zoom[0] + (zoom[1] - zoom[0]) * k
+        if self.parallax is not None:
+            frame = self.parallax_bg(frame, z, (focus[0] + 8 * math.sin(t * 0.8), focus[1]))
         who = self.who(shot)
         tc, fc = (math.floor(t * 15) / 15, (f // 2) * 2) if self.twos else (t, f)
         for w in who:
@@ -227,15 +246,41 @@ class Production:
         if (wide and self.crowd_wide) or shot in self.crowd_in:
             crowd(frame, t, self.song.spb)
         frame = stage_light(frame, t)
+        if self.ghost > 0:
+            frame = self.blend_ghost(frame, (a, shot))
         if self.look is not None:
             frame = self.look(frame, f)
-        k = (t - a) / (b - a)
         credit = list(dict.fromkeys([w.j["credit"] for w in who])) + [self.song.credit]
-        zoom = opts.get("zoom", self.zoom_wide if wide else self.zoom)
-        focus = opts.get("focus", (W / 2, H * 0.42))
-        if callable(focus):
-            focus = focus(t)
-        return finish(frame, t, int(k * 100), 101, rng, credit, zoom=zoom, focus=focus)
+        return finish(frame, t, 0, 1, rng, credit, zoom=(z, z), focus=focus)
+
+    def parallax_bg(self, frame, z, fc):
+        """Pre-warp the stage so that, after the camera (zoom z about focus fc), the back wall moves
+        and zooms only `parallax` as much as the characters; the floor blends to 1 toward the bottom."""
+        if not hasattr(self, "_pg"):
+            yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+            p = np.full((H, 1), self.parallax, np.float32)
+            y0 = int(H * 0.80)
+            p[y0:, 0] = np.linspace(self.parallax, 1.0, H - y0)
+            self._pg = (xx, yy, p)
+        xx, yy, p = self._pg
+        c = np.array([W / 2, H * 0.42], np.float32)
+        zb = 1 + p * (z - 1)
+        fxb = c[0] + p * (fc[0] - c[0])
+        fyb = c[1] + p * (fc[1] - c[1])
+        mx = fxb + (z / zb) * (xx - fc[0])
+        my = fyb + (z / zb) * (yy - fc[1])
+        return cv2.remap(frame, mx.astype(np.float32), my.astype(np.float32), cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+
+    def blend_ghost(self, frame, key):
+        """Frame blending on fast motion: where the picture changed a lot since the last frame of
+        the same shot, mix in some of the last frame (a soft trail, like the run in Clint Eastwood).
+        Held parts are untouched."""
+        prev, self._prev = self._prev, (key, frame.copy())
+        if prev is None or prev[0] != key:
+            return frame
+        d = np.abs(frame - prev[1]).mean(2, keepdims=True)
+        w = self.ghost * np.clip((d - 0.04) / 0.12, 0, 1)
+        return frame + w * (prev[1] - frame)
 
     def render(self, t0, t1, out, frames=None):
         n0, n1 = int(round(t0 * FPS)), int(round(t1 * FPS))
@@ -288,10 +333,12 @@ class Production:
 
     def main(self, argv):
         what = argv[1] if len(argv) > 1 else "video"
-        if what == "segment":  # segment t0 t1 [out] -> with audio
+        if what == "segment":  # segment t0 t1 [out]: with an out path, video only (used by render_all)
             t0, t1 = float(argv[2]), float(argv[3])
-            out = argv[4] if len(argv) > 4 else f"{ROOT}/out/{self.name}-{argv[2]}-{argv[3]}.mp4"
-            print(self.render_range(t0, t1, out))
+            if len(argv) > 4:
+                self.render(t0, t1, argv[4])
+            else:
+                print(self.render_range(t0, t1, f"{ROOT}/out/{self.name}-{argv[2]}-{argv[3]}.mp4"))
         elif what == "stills":
             self.stills([float(a) for a in argv[2:]], f"{ROOT}/out/{self.name}-still")
         elif what == "video":
