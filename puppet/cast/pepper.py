@@ -66,8 +66,8 @@ class Drummer:
         self.floor_y = P(0, 1760)[1]
         self.ao = None
         hs = j["hand"]
-        self.hands = {"l": handrig.StickHand(hs["skin_bgr"], hs["length"] * s, mirror=False), "r": handrig.StickHand(hs["skin_bgr"], hs["length"] * s, mirror=True)}
-        self.hand_anchor = (0.0, -0.04, 0.0)  # the wrist sits a little inside the cuff
+        self.hands = {"l": handrig.StickHand(hs["skin_bgr"], 1.12 * hs["length"] * s, mirror=False), "r": handrig.StickHand(hs["skin_bgr"], 1.12 * hs["length"] * s, mirror=True)}
+        self.hand_anchor = (0.0, 0.14, 0.0)  # the wrist sits deep inside the wide cuff, so the hand never pops out of a corner
         # which hand plays what: viewer's left (her right hand) = snare and toms, viewer's right = hats and crash
         piece_at = {DRUM["SNARE"]: "snare", DRUM["TOM_HI"]: "tom_hi", DRUM["TOM_MID"]: "tom_mid", DRUM["TOM_LO"]: "floor",
                     DRUM["HAT"]: "hat", DRUM["OPEN_HAT"]: "hat", DRUM["CRASH"]: "crash"}
@@ -176,6 +176,7 @@ class Drummer:
             yaw, s_hand = hd.solve(ang_now, fore)
             loose = lift * 1.4 - 0.15
             poses[side] = (S, E, Wr, yaw, s_hand, loose)
+        self._poses = poses
         # back to front: floor shadows, stands, upper arms, body (shaded behind the kit), cymbals, drums, hands, forearms
         kx, ky = self.kit["kick"][1]
         props.floor_shadow(frame, kx, min(H - 5, ky + 300 * s), 520 * s, 60 * s, 0.55)
