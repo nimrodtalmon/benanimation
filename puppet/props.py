@@ -335,11 +335,11 @@ def _chaikin(pts, n=3):
     return P
 
 
-def guitar(Lb, ink=5):
+def guitar(Lb, ink=5, neck=1.55, burst=((0.25, 0.55, 0.85), (0.22, 0.20, 0.10)), n_strings=6):
     """Single-cutaway electric guitar, neck pointing right (+x), strings drawn per frame.
     Lb = body length in px. Anchors: strum (over the pickups), bridge, nut, and the string
-    spacing, so callers can draw ringing strings."""
-    neck_len, neck_w, head_len = 1.55 * Lb, 0.13 * Lb, 0.36 * Lb
+    spacing, so callers can draw ringing strings. A bass: neck=2.1, n_strings=4, darker burst."""
+    neck_len, neck_w, head_len = neck * Lb, (0.13 if n_strings == 6 else 0.12) * Lb, 0.36 * Lb
     pad = ink + 6
     w = int(Lb + neck_len + head_len + 2 * pad)
     h = int(0.9 * Lb + 2 * pad)
@@ -354,7 +354,7 @@ def guitar(Lb, ink=5):
     yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
     rr = np.sqrt(((xx - ox - 0.42 * Lb) / (0.62 * Lb)) ** 2 + ((yy - oy) / (0.42 * Lb)) ** 2)
     k = np.clip((rr - 0.25) / 0.75, 0, 1)[..., None] ** 1.3
-    burst = np.array([0.25, 0.55, 0.85], np.float32) * (1 - k) + np.array([0.22, 0.20, 0.10], np.float32) * k
+    burst = np.array(burst[0], np.float32) * (1 - k) + np.array(burst[1], np.float32) * k
     _poly(img, body, burst, ink=0)
     # neck and headstock
     nx0, nx1 = ox + 0.92 * Lb, ox + Lb + neck_len
@@ -394,8 +394,8 @@ def guitar(Lb, ink=5):
     hl = cv2.GaussianBlur(hl, (0, 0), 5)
     img[..., :3] = img[..., :3] * (1 - 0.45 * hl[..., None]) + 0.45 * hl[..., None]
     _line(img, body, ink, closed=True)
-    return img, dict(strum=(ox + 0.62 * Lb, oy), bridge=(bx, oy), nut=(nx1, oy), spacing=0.022 * Lb, neck_w=neck_w,
-                     neck=(ox + Lb, oy), neck_len=neck_len)
+    return img, dict(strum=(ox + 0.62 * Lb, oy), bridge=(bx, oy), nut=(nx1, oy), spacing=(0.022 if n_strings == 6 else 0.03) * Lb, neck_w=neck_w,
+                     neck=(ox + Lb, oy), neck_len=neck_len, n=n_strings)
 
 
 def strings(img, anc, ring, t, color=(0.85, 0.86, 0.88)):
@@ -403,16 +403,17 @@ def strings(img, anc, ring, t, color=(0.85, 0.86, 0.88)):
     out = img.copy()
     (bx, by), (nx, ny) = anc["bridge"], anc["nut"]
     sp = anc["spacing"]
+    n = anc.get("n", 6)
     xs = np.linspace(bx, nx, 60)
     env = np.sin(np.pi * (xs - bx) / (nx - bx))
-    for i in range(6):
-        y0 = by + (i - 2.5) * sp
-        y1 = ny + (i - 2.5) * sp * 0.75
+    for i in range(n):
+        y0 = by + (i - (n - 1) / 2) * sp
+        y1 = ny + (i - (n - 1) / 2) * sp * 0.75
         ys = y0 + (y1 - y0) * (xs - bx) / (nx - bx)
         amp = ring * (2.5 + 0.4 * i)
         for k, ph in enumerate((0.0, math.pi)):
             yk = ys + amp * env * math.sin(2 * math.pi * (55 + 9 * i) * t + ph)
-            _line(out, np.stack([xs, yk], 1), 1.4 if k == 0 else 1.0, color=color)
+            _line(out, np.stack([xs, yk], 1), (1.4 if k == 0 else 1.0) * (1.6 if n == 4 else 1.0), color=color)
     return out
 
 

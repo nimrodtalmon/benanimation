@@ -1,0 +1,108 @@
+{
+ "credit": "Drawing: Ben (arms and jacket below the page: code stand-ins)",
+ "pad": 180,
+ "src_h": 2518,
+ "head": {
+  "head_ells": [
+   [
+    820,
+    560,
+    520,
+    440
+   ],
+   [
+    800,
+    860,
+    430,
+    330
+   ]
+  ],
+  "neck": [
+   610,
+   910,
+   1000,
+   1290
+  ],
+  "face": [
+   815,
+   690,
+   390,
+   450
+  ],
+  "pivot": [
+   770,
+   1010
+  ],
+  "mouth": [
+   760,
+   935,
+   200,
+   40
+  ],
+  "chin": 990,
+  "eyes": [
+   [
+    570,
+    600,
+    140,
+    125
+   ],
+   [
+    1000,
+    590,
+    145,
+    125
+   ]
+  ],
+  "lid_from": 150,
+  "lash": [
+   20,
+   18,
+   19
+  ],
+  "lash_w": 14,
+  "hair_from": 760,
+  "turn_px": 16
+ },
+ "hand": {
+  "skin_bgr": [
+   228,
+   226,
+   224
+  ],
+  "length": 300
+ },
+ "upper_arm": {
+  "file": "upper_arm.png",
+  "shoulder": [
+   105.0,
+   95.0
+  ],
+  "elbow": [
+   105.0,
+   705.0
+  ]
+ },
+ "forearm": {
+  "file": "forearm.png",
+  "elbow": [
+   97.5,
+   87.5
+  ],
+  "wrist": [
+   97.5,
+   545.1
+  ]
+ },
+ "shoulders": {
+  "left": [
+   330,
+   1390
+  ],
+  "right": [
+   1540,
+   1400
+  ]
+ },
+ "arm_width": 150
+}

@@ -1,0 +1,108 @@
+{
+ "credit": "Drawing: Ben (arms and hoodie below the page: code stand-ins)",
+ "pad": 120,
+ "src_h": 2080,
+ "head": {
+  "head_ells": [
+   [
+    410,
+    310,
+    340,
+    270
+   ],
+   [
+    410,
+    540,
+    290,
+    300
+   ]
+  ],
+  "neck": [
+   310,
+   520,
+   760,
+   880
+  ],
+  "face": [
+   410,
+   480,
+   270,
+   330
+  ],
+  "pivot": [
+   400,
+   730
+  ],
+  "mouth": [
+   380,
+   570,
+   110,
+   30
+  ],
+  "chin": 810,
+  "eyes": [
+   [
+    260,
+    410,
+    60,
+    25
+   ],
+   [
+    480,
+    420,
+    60,
+    25
+   ]
+  ],
+  "lid_from": 150,
+  "lash": [
+   20,
+   18,
+   19
+  ],
+  "lash_w": 10,
+  "hair_from": 440,
+  "turn_px": 14
+ },
+ "hand": {
+  "skin_bgr": [
+   150,
+   200,
+   238
+  ],
+  "length": 210
+ },
+ "upper_arm": {
+  "file": "upper_arm.png",
+  "shoulder": [
+   92.5,
+   82.5
+  ],
+  "elbow": [
+   92.5,
+   512.5
+  ]
+ },
+ "forearm": {
+  "file": "forearm.png",
+  "elbow": [
+   86.0,
+   76.25
+  ],
+  "wrist": [
+   86.0,
+   410.65
+  ]
+ },
+ "shoulders": {
+  "left": [
+   260,
+   920
+  ],
+  "right": [
+   820,
+   920
+  ]
+ },
+ "arm_width": 125
+}

@@ -214,68 +214,8 @@
 "t1": 89.0
 }
 ],
-"credit": "Music: Distorted Reality (the band), used with permission",
+"credit": "Music: Distorted Reality (the band)",
 "drums": [
-{
-"beat": null,
-"piece": 42,
-"vel": 78,
-"t": 4.017
-},
-{
-"beat": null,
-"piece": 42,
-"vel": 74,
-"t": 10.693
-},
-{
-"beat": null,
-"piece": 42,
-"vel": 68,
-"t": 11.041
-},
-{
-"beat": null,
-"piece": 42,
-"vel": 88,
-"t": 11.656
-},
-{
-"beat": null,
-"piece": 42,
-"vel": 88,
-"t": 12.597
-},
-{
-"beat": null,
-"piece": 42,
-"vel": 67,
-"t": 12.957
-},
-{
-"beat": null,
-"piece": 42,
-"vel": 70,
-"t": 13.584
-},
-{
-"beat": null,
-"piece": 42,
-"vel": 83,
-"t": 13.688
-},
-{
-"beat": null,
-"piece": 42,
-"vel": 84,
-"t": 14.652
-},
-{
-"beat": null,
-"piece": 42,
-"vel": 79,
-"t": 15.128
-},
 {
 "beat": null,
 "piece": 38,

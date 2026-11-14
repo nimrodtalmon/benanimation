@@ -82,6 +82,12 @@ def drums(y):
         elif d["piece"] == GM["HAT"] and d["t"] - last_crash < 0.25:
             continue
         clean.append(d)
+    # bleed gate: no hits where the drum stem as a whole is near silent (other instruments leak
+    # a little into the stem's high band)
+    e_all = env(y)
+    e_all = np.convolve(e_all, np.ones(int(0.5 * SR / HOP)) / int(0.5 * SR / HOP), mode="same")
+    ref = np.percentile(e_all, 95)
+    clean = [d for d in clean if e_all[min(len(e_all) - 1, int(d["t"] * SR / HOP))] > 0.15 * ref]
     # the envelope peak trails the attack by ~2 frames: move hits to the attack
     for d in clean:
         d["t"] = max(0.0, d["t"] - 2 * HOP / SR)
