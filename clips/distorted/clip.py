@@ -119,7 +119,15 @@ def shot_list():
         else:
             shots.append((t0, t1, who, {}))
         t0, i = t1, i + 1
-    return [sh for sh in shots if sh[1] - sh[0] > 0.02]
+    # no gaps, no overlaps: each shot ends where the next begins; slivers go to their neighbor
+    shots = [sh for sh in shots if sh[1] - sh[0] > 0.02]
+    out = []
+    for i, (a, b, w, o) in enumerate(shots):
+        nb = shots[i + 1][0] if i + 1 < len(shots) else b
+        a = out[-1][1] if out else 0.0
+        if nb > a:
+            out.append((a, nb, w, o))
+    return out
 
 
 SHOTS = shot_list()
