@@ -22,9 +22,14 @@ class Spring:
         self.x, self.v, self.w, self.z = np.array(x, float), np.zeros_like(np.array(x, float)), omega, zeta
 
     def step(self, target, dt=1 / FPS):
-        a = self.w * self.w * (np.asarray(target, float) - self.x) - 2 * self.z * self.w * self.v
-        self.v = self.v + a * dt
-        self.x = self.x + self.v * dt
+        # semi-implicit Euler, substepped so stiff springs (w*dt large) stay stable
+        n = max(1, int(math.ceil(self.w * dt / 0.25)))
+        h = dt / n
+        tg = np.asarray(target, float)
+        for _ in range(n):
+            a = self.w * self.w * (tg - self.x) - 2 * self.z * self.w * self.v
+            self.v = self.v + a * h
+            self.x = self.x + self.v * h
         return self.x
 
     def at(self, target, t):
@@ -172,3 +177,87 @@ class Walk:
             out[side] = (x + (fx - x) * sp, lift * sp)
         bob = self.bob * sp * abs(math.sin(2 * math.pi * d / self.stride))
         return out, bob, sp
+
+
+# ---------------------------------------------------------------- fluid motion (overlap, weight, drag)
+def wrap(a):
+    return (a + math.pi) % (2 * math.pi) - math.pi
+
+
+class AngleSpring(Spring):
+    """A Spring for an angle (radians): always takes the short way round."""
+
+    def at(self, target, t):
+        cur = float(self.x) if getattr(self, "t", None) is not None else float(target)
+        return super().at(cur + wrap(float(target) - cur), t)
+
+
+class ArmFollow:
+    """Overlapping action for a two-bone limb: the IK answer gives the *wanted* shoulder angle and
+    elbow bend; the shoulder follows it with a spring, the elbow bend with a slower, bouncier one,
+    so the forearm trails, overshoots a little and settles (follow-through). `stiff` (0..1) makes
+    both springs fast, for when the hand must be exactly somewhere (a mic at the mouth)."""
+
+    def __init__(self, bend=1.0, w_sh=9.0, z_sh=0.75, w_el=6.0, z_el=0.5):
+        self.bend = bend
+        self.sh = AngleSpring(0.0, w_sh, z_sh)
+        self.el = AngleSpring(0.0, w_el, z_el)
+        self.base = (w_sh, w_el)
+        self.prev = None
+
+    def at(self, S, target, L1, L2, t, stiff=0.0):
+        from limb import ik
+        E, Wr = ik(S, target, L1, L2, self.bend)
+        a1 = math.atan2(E[1] - S[1], E[0] - S[0])
+        rel = wrap(math.atan2(Wr[1] - E[1], Wr[0] - E[0]) - a1)
+        k = 1 + 3 * stiff
+        self.sh.w, self.el.w = self.base[0] * k, self.base[1] * k
+        a1s = float(self.sh.at(a1, t))
+        rels = float(self.el.at(rel, t))
+        E = np.asarray(S, float) + L1 * np.array([math.cos(a1s), math.sin(a1s)])
+        a2 = a1s + rels
+        Wr = E + L2 * np.array([math.cos(a2), math.sin(a2)])
+        om = 0.0
+        if self.prev is not None and t > self.prev[0]:
+            om = wrap(a2 - self.prev[1]) / (t - self.prev[0])
+        self.prev = (t, a2)
+        return E, Wr, a2, om
+
+
+class Drag:
+    """Hand (or any end part) drag: an angle that trails the parent's rotation and swings back,
+    e.g. the wrist when the forearm swings. Returns radians to add to the child's angle."""
+
+    def __init__(self, k=0.08, limit=0.55, w=11.0, z=0.45):
+        self.k, self.limit = k, limit
+        self.s = Spring(0.0, w, z)
+
+    def at(self, omega, t):
+        return float(self.s.at(max(-self.limit, min(self.limit, -self.k * omega)), t))
+
+
+def gait_body(walk, t):
+    """Weight shift for a front-view walk (same phase as walk.feet): the hips shift toward the
+    stance foot and drop on the swing side, the shoulders counter-tilt, the body is lowest just
+    after each foot contact and highest at the passing position. All scaled by walking speed.
+    Returns dict(sway_px, bob_px (+ = down), hip_tilt, shoulder_tilt (radians), speed)."""
+    x = walk.path.x(t)
+    sp = min(1.0, abs(walk.path.v(t)) / walk.v_full)
+    u = x / walk.stride
+    leg = walk.lift / 0.16  # the walk was built with lift = 0.16 x leg length
+    sway = -0.045 * leg * math.sin(2 * math.pi * u) * sp
+    bob = 0.028 * leg * math.cos(4 * math.pi * (u - 0.06)) * sp
+    hip = math.radians(3.0) * math.sin(2 * math.pi * u) * sp
+    return dict(sway_px=sway, bob_px=bob, hip_tilt=hip, shoulder_tilt=-0.6 * hip, speed=sp)
+
+
+class Lean:
+    """Leans into a move and settles past upright when the move stops (underdamped)."""
+
+    def __init__(self, k_deg_per_px_s=0.012, max_deg=6.0, w=5.0, z=0.45):
+        self.k, self.max = k_deg_per_px_s, max_deg
+        self.s = Spring(0.0, w, z)
+
+    def at(self, velocity, t):
+        tgt = max(-self.max, min(self.max, self.k * velocity))
+        return math.radians(float(self.s.at(tgt, t)))

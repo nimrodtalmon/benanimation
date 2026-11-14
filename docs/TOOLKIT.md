@@ -113,3 +113,11 @@ timing from `song` (never from a global), so it works in any clip with any song.
 - **Clip 2 (`clips/soundcheck`)** was written against the toolkit only. What it needed and added
   there: walking, legs, picking up a prop, light cues, camera pans. The next clip should need
   less new code.
+
+### Fluid motion (Nov 2026, `fluid=True`)
+- Springs integrate semi-implicitly with substeps; stiff springs at 30 fps were unstable and flung the mic arm.
+- Arms: `ArmFollow` (shoulder leads, elbow trails), `Drag` on the hand; front-view arm swing stays small in-plane (large swings read as hands on hips).
+- Walk: `gait_body` gives hip/shoulder counter-tilt, sway over the stance leg, and a bob. `Lean` follows velocity. A loosely damped `settle` spring on speed adds a dip and overshoot when he stops.
+- Face: mouth shapes lead the audio by 2 frames; head accents land 0.1 s early; the head drifts a little during holds.
+- Finish: `HandDrawn` (line boil, paper, grade). `twos=True` steps characters at 15 fps while the camera stays at 30.
+- Sources: research notes in the session (Candeland on Clint Eastwood: hold most parts, make mouth/hands/hair good; successive breaking of joints; lip sync 2 frames early).

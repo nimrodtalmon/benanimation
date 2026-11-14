@@ -139,13 +139,63 @@ def crowd(frame, t, spb, n=13, h=240, seed=4):
 
 
 
+class HandDrawn:
+    """A hand-drawn finish (look options): line boil (the whole image wobbles a pixel or two and
+    re-draws every few frames, like traced drawings), paper grain multiplied in, and a color grade
+    (lifted teal shadows, warm highlights, a gentle S-curve). Background areas are smooth, so the
+    boil only shows on lines and texture."""
+
+    def __init__(self, boil=1.3, hold=3, paper=0.07, grade=0.6, seed=0):
+        self.boil, self.hold, self.paper, self.grade = boil, hold, paper, grade
+        rng = np.random.default_rng(seed)
+        g = rng.normal(0, 1, (H, W)).astype(np.float32)
+        fib = cv2.GaussianBlur(rng.normal(0, 1, (H, W)).astype(np.float32), (0, 0), sigmaX=6, sigmaY=0.8)
+        blot = cv2.GaussianBlur(rng.normal(0, 1, (H // 8, W // 8)).astype(np.float32), (0, 0), 3)
+        blot = cv2.resize(blot, (W, H))
+        tex = 0.45 * g / g.std() + 0.35 * fib / fib.std() + 0.5 * blot / blot.std()
+        self.tex = (tex / tex.std())[..., None]
+        self._k, self._maps = None, None
+
+    def maps(self, f):
+        k = f // self.hold
+        if k != self._k:
+            rng = np.random.default_rng(1000 + k)
+            hs = 8
+            dx = cv2.GaussianBlur(rng.normal(0, 1, (H // hs, W // hs)).astype(np.float32), (0, 0), 2.2)
+            dy = cv2.GaussianBlur(rng.normal(0, 1, (H // hs, W // hs)).astype(np.float32), (0, 0), 2.2)
+            dx = cv2.resize(dx / (dx.std() + 1e-6), (W, H)) * self.boil
+            dy = cv2.resize(dy / (dy.std() + 1e-6), (W, H)) * self.boil
+            X, Y = np.meshgrid(np.arange(W, dtype=np.float32), np.arange(H, dtype=np.float32))
+            self._maps, self._k = (X + dx, Y + dy), k
+        return self._maps
+
+    def __call__(self, frame, f):
+        if self.boil > 0:
+            mx, my = self.maps(f)
+            frame = cv2.remap(frame, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+        if self.paper > 0:
+            frame = frame * (1 + self.paper * self.tex * (0.35 + frame.mean(2, keepdims=True)))
+        if self.grade > 0:
+            lum = frame.mean(2, keepdims=True)
+            sh = np.clip(1 - lum * 2.5, 0, 1) * np.array([0.035, 0.02, -0.01], np.float32)  # teal shadows (BGR)
+            hi = np.clip(lum * 2 - 1, 0, 1) * np.array([-0.03, 0.0, 0.04], np.float32)  # warm highlights
+            c = np.clip(frame, 0, 1)
+            curve = c * c * (3 - 2 * c)
+            frame = frame + self.grade * (0.35 * (curve - c) + sh + hi)
+        return frame
+
+
 class Production:
-    def __init__(self, song, cast, shots, name, crowd_in=(), zoom_wide=(1.04, 1.0), zoom=(1.0, 1.05), script=None, cue=None):
+    def __init__(self, song, cast, shots, name, crowd_in=(), zoom_wide=(1.04, 1.0), zoom=(1.0, 1.05), script=None, cue=None,
+                 look=None, twos=False):
+        """look: a HandDrawn finish (or None); twos: characters move on twos (15 drawings a second,
+        the camera and lights stay smooth), the cadence of hand-drawn 2D."""
         self.song, self.cast_f, self.shots, self.name = song, cast, shots, name
         self.crowd_in = set(crowd_in)
         self.zoom_wide, self.zoom = zoom_wide, zoom
         self.script = script
         self.cue = cue  # cue(t, shot) -> Stage cue dict (lights per moment and shot)
+        self.look, self.twos = look, twos
         self.cast = {}
         self.stage = Stage(song)
 
@@ -169,13 +219,16 @@ class Production:
         wide = isinstance(shot, (tuple, list))
         frame = self.stage.frame(t, wide, self.cue(t, shot) if self.cue else None)
         who = self.who(shot)
+        tc, fc = (math.floor(t * 15) / 15, (f // 2) * 2) if self.twos else (t, f)
         for w in who:
             if hasattr(w, "advance"):
-                w.advance(f)
-            w.draw(frame, t)
+                w.advance(fc)
+            w.draw(frame, tc)
         if wide or shot in self.crowd_in:
             crowd(frame, t, self.song.spb)
         frame = stage_light(frame, t)
+        if self.look is not None:
+            frame = self.look(frame, f)
         k = (t - a) / (b - a)
         credit = list(dict.fromkeys([w.j["credit"] for w in who])) + [self.song.credit]
         zoom = opts.get("zoom", self.zoom_wide if wide else self.zoom)
@@ -221,6 +274,16 @@ class Production:
         subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0", "-i", lst, "-i", self.song.audio,
                         "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest", out], check=True)
         print(out)
+        return out
+
+    def render_range(self, t0, t1, out):
+        """A short piece with its audio (for tests and options)."""
+        tmp = out + ".v.mp4"
+        self.render(t0, t1, tmp)
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", tmp, "-ss", str(t0), "-t", str(t1 - t0), "-i", self.song.audio,
+                        "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-preset", "medium", "-crf", "22", "-pix_fmt", "yuv420p",
+                        "-c:a", "aac", "-shortest", out], check=True)
+        os.remove(tmp)
         return out
 
     def main(self, argv):
