@@ -31,9 +31,10 @@ class Drummer:
     PARTS = f"{ROOT}/public/parts/pepper"
     upper_front = False
 
-    def __init__(self, song=None, scale=0.6, cx=W / 2, top=20, empty=False, head=1.0, face=False, groove=0.0):
+    def __init__(self, song=None, scale=0.6, cx=W / 2, top=20, empty=False, head=1.0, face=False, groove=0.0, kit=None, kit_size=1.15):
         """empty=True: only the kit (before she sits down). groove: body sway and head-banging with
-        the music (puppet/groove.py; 0 = as before)."""
+        the music (puppet/groove.py; 0 = as before). kit: a 3D kit (public/kits/<kit>.json, rendered by
+        puppet/kit3d.py) instead of the code-drawn one."""
         self.song = song or Song.default()
         self.empty = empty
         s = scale
@@ -47,6 +48,10 @@ class Drummer:
         ax, ay = self.kit_anchor
         P = lambda x, y: (ax + (x - 403) * s, ay + (y - 650) * s)  # noqa: E731  kit units -> screen
         self.P = P
+        self.k3 = None
+        if kit:
+            from kit3d import Kit3D
+            self.k3 = Kit3D(kit, kit_size)
         skull = cv2.imread(f"{ROOT}/public/clip/skull.png", cv2.IMREAD_UNCHANGED)
         # an open-handed kit seen from the audience: hi-hat and snare on the viewer's right (played
         # by the near hand, no crossing), rack toms on the bass drum angled toward her, floor tom
@@ -75,6 +80,10 @@ class Drummer:
             if d["piece"] not in piece_at:
                 continue
             what = piece_at[d["piece"]]
+            if self.k3 is not None and what not in self.k3.meta["pieces"]:  # a piece this kit lacks: the nearest one it has
+                what = next(w for w in {"tom_mid": ["tom_hi", "floor"], "tom_hi": ["tom_mid", "floor"], "floor": ["tom_mid", "tom_hi"],
+                                        "crash": ["ride", "hat"], "hat": ["ride", "crash"]}.get(what, ["snare"]) + ["snare"]
+                            if w in self.k3.meta["pieces"])
             hand = hand_of[what]
             if self.hits[hand] and d["t"] - self.hits[hand][-1][0] < 0.11:
                 other = "l" if hand == "r" else "r"
@@ -124,7 +133,42 @@ class Drummer:
     # edge, drummer's side
     STRIKE = {"hat": (0.3, -0.4), "crash": (-0.35, -0.8), "ride": (0.3, -0.45), "drum": (0.15, -0.15)}
 
+    def draw_kit3d(self, frame, t, fig, x0, top, uppers):
+        """The rendered 3D kit: body behind it, then the static layer, then the moving cymbals at
+        their nearest rendered state (each already cut where something is in front of it)."""
+        s = self.s
+        if not self.upper_front:
+            uppers()
+        if not self.empty:
+            warp.over(frame, fig, int(round(x0)), int(top))
+        if self.upper_front:
+            uppers()
+        if self.ao is None:  # the kit shades what is right behind it
+            m = np.zeros((H, W, 3), np.float32)
+            a = self.k3.layer("static", s)[..., 3:4]
+            im = np.concatenate([a, a, a, a], -1)
+            k3 = self.k3
+            ox, oy = self.P(*k3.meta["origin"])
+            ox, oy = int(round(ox)), int(round(oy))
+            h, w = a.shape[:2]
+            x0_, y0_, x1_, y1_ = max(0, ox), max(0, oy), min(W, ox + w), min(H, oy + h)
+            if x1_ > x0_ and y1_ > y0_:
+                m[y0_:y1_, x0_:x1_] = im[y0_ - oy:y1_ - oy, x0_ - ox:x1_ - ox, :3]
+            m = cv2.GaussianBlur(m[..., 0], (0, 0), 30 * s)
+            self.ao = (1 - 0.4 * np.clip(m * 1.4, 0, 1))[..., None].astype(np.float32)
+        frame *= self.ao
+        self.k3.draw(frame, self.P, s, "static")
+        crash, _ = decay_since(t, self.times["crash"], 0.7)
+        last = self.times["crash"][self.times["crash"] <= t]
+        wob = 9.0 * crash * math.sin(2 * math.pi * 3.2 * (t - last[-1])) if len(last) and crash else 0.0
+        self.k3.draw(frame, self.P, s, "crash", wob)
+        hat, _ = decay_since(t, self.times["hat"], 0.15)
+        opened = decay_since(t, self.times["open"], 0.35)[0]
+        self.k3.draw(frame, self.P, s, "hat", 1.0 * opened - 0.3 * hat)
+
     def strike_point(self, what, side):
+        if self.k3 is not None:  # the 3D kit knows its own strike points (kit units)
+            return np.array(self.P(*self.k3.strike(what, side)))
         img, anc = self.kit[what][0]
         x, y = self.kit[what][1]
         sg = -1 if side == "l" else 1
@@ -224,70 +268,73 @@ class Drummer:
             loose = lift * 1.4 - 0.15
             poses[side] = (S, E, Wr, yaw, s_hand, loose)
         self._poses = poses
-        # back to front: floor shadows, stands, upper arms, body (shaded behind the kit), cymbals, drums, hands, forearms
-        kx, ky = self.kit["kick"][1]
-        props.floor_shadow(frame, kx, min(H - 5, ky + 300 * s), 520 * s, 60 * s, 0.55)
-        sw = max(4, int(8 * s / 0.72))
-        for what in ("crash", "hat"):
-            x, y = self.kit[what][1]
-            props.stand(frame, (x, y), min(H + 30, self.floor_y), sw)
-        sx, sy = self.kit["snare"][1]
-        props.stand(frame, (sx, sy + 60 * s), min(H + 30, self.floor_y), sw, tilter=False)
         def uppers():
             for side in ("l", "r") if not self.empty else ():
                 S, E, Wr = poses[side][:3]
                 lay, (x, y) = self.arms[side].render(S, E, Wr, sp, (W, H), part="upper")
                 if lay is not None:
                     warp.over(frame, lay, x, y)
-        if not self.upper_front:
-            uppers()
-        if not self.empty:
-            warp.over(frame, fig, int(round(x0)), int(top))
-        if self.upper_front:  # sleeves drawn over the body (a drawing whose jacket hides the shoulder joints)
-            uppers()
-        if self.ao is None:  # the kit shades what is right behind it
-            m = np.zeros((H, W, 3), np.float32)
-            for what in ("floor", "tom_hi", "tom_mid", "kick", "snare"):
+        if self.k3 is not None:
+            self.draw_kit3d(frame, t, fig, x0, top, uppers)
+        else:
+            # back to front: floor shadows, stands, upper arms, body (shaded behind the kit), cymbals, drums, hands, forearms
+            kx, ky = self.kit["kick"][1]
+            props.floor_shadow(frame, kx, min(H - 5, ky + 300 * s), 520 * s, 60 * s, 0.55)
+            sw = max(4, int(8 * s / 0.72))
+            for what in ("crash", "hat"):
+                x, y = self.kit[what][1]
+                props.stand(frame, (x, y), min(H + 30, self.floor_y), sw)
+            sx, sy = self.kit["snare"][1]
+            props.stand(frame, (sx, sy + 60 * s), min(H + 30, self.floor_y), sw, tilter=False)
+            if not self.upper_front:
+                uppers()
+            if not self.empty:
+                warp.over(frame, fig, int(round(x0)), int(top))
+            if self.upper_front:  # sleeves drawn over the body (a drawing whose jacket hides the shoulder joints)
+                uppers()
+            if self.ao is None:  # the kit shades what is right behind it
+                m = np.zeros((H, W, 3), np.float32)
+                for what in ("floor", "tom_hi", "tom_mid", "kick", "snare"):
+                    img, anc = self.kit[what][0]
+                    blit(m, np.dstack([np.ones_like(img[..., :3]), img[..., 3:]]), place(img, anc.get("head", anc.get("center")), self.kit[what][1], 0.0, 1.0))
+                m = cv2.GaussianBlur(m[..., 0], (0, 0), 30 * s)
+                self.ao = (1 - 0.45 * np.clip(m * 1.4, 0, 1))[..., None].astype(np.float32)
+            frame *= self.ao
+            crash, _ = decay_since(t, self.times["crash"], 0.7)
+            hat, dt_hat = decay_since(t, self.times["hat"], 0.15)
+            opened = decay_since(t, self.times["open"], 0.35)[0]
+            rx_, ry_ = self.kit["ride"][1]
+            props.stand(frame, (rx_, ry_), min(H + 30, self.floor_y), sw)
+            img, anc = self.kit["ride"][0]
+            blit(frame, img, place(img, anc["center"], (rx_, ry_), math.radians(6), 1.0))
+            for what in ("hat_low", "hat", "crash"):
                 img, anc = self.kit[what][0]
-                blit(m, np.dstack([np.ones_like(img[..., :3]), img[..., 3:]]), place(img, anc.get("head", anc.get("center")), self.kit[what][1], 0.0, 1.0))
-            m = cv2.GaussianBlur(m[..., 0], (0, 0), 30 * s)
-            self.ao = (1 - 0.45 * np.clip(m * 1.4, 0, 1))[..., None].astype(np.float32)
-        frame *= self.ao
-        crash, _ = decay_since(t, self.times["crash"], 0.7)
-        hat, dt_hat = decay_since(t, self.times["hat"], 0.15)
-        opened = decay_since(t, self.times["open"], 0.35)[0]
-        rx_, ry_ = self.kit["ride"][1]
-        props.stand(frame, (rx_, ry_), min(H + 30, self.floor_y), sw)
-        img, anc = self.kit["ride"][0]
-        blit(frame, img, place(img, anc["center"], (rx_, ry_), math.radians(6), 1.0))
-        for what in ("hat_low", "hat", "crash"):
-            img, anc = self.kit[what][0]
-            x, y = self.kit[what][1]
-            if what == "crash":
-                ang = math.radians(9) * crash * math.sin(2 * math.pi * 3.2 * (t - (self.times["crash"][self.times["crash"] <= t][-1] if crash else 0))) - math.radians(8)
-            elif what == "hat":
-                y = y - 10 * s * opened + 4 * s * hat
-                ang = math.radians(3) * hat
-            else:
-                ang = 0.0
-            blit(frame, img, place(img, anc["center"], (x, y), ang, 1.0))
-        fx, fy = self.kit["floor"][1]
-        fimg = self.kit["floor"][0][0]
-        for dxl in (-0.75, 0.0, 0.8):  # floor tom legs
-            bx = fx + dxl * fimg.shape[1] / 2
-            props.pole(frame, (bx, fy + 150 * s), (bx + dxl * 40 * s, min(H + 20, self.floor_y)), max(3, int(6 * s / 0.72)))
-        for tw, ax in (("tom_mid", -55), ("tom_hi", 55)):  # tom arms out of the bass drum
-            tx, ty = self.kit[tw][1]
-            props.tom_mount(frame, (kx + ax * s, ky - 300 * s), (tx, ty + 75 * s), max(4, int(9 * s / 0.72)))
-        for sgn in (-1, 1):  # spurs on the bass drum
-            props.pole(frame, (kx + sgn * 280 * s, ky + 120 * s), (kx + sgn * 380 * s, min(H + 20, ky + 330 * s)), max(3, int(7 * s / 0.72)))
-        for what in ("floor", "tom_mid", "tom_hi", "snare", "kick"):  # back to front (the snare sits behind the bass drum)
-            img, anc = self.kit[what][0]
-            x, y = self.kit[what][1]
-            hit, _ = decay_since(t, self.times[what], 0.1)
-            sc = 1.0 + 0.02 * hit
-            anchor = anc.get("head", anc.get("center"))
-            blit(frame, img, place(img, anchor, (x, y + 2 * hit), math.radians(self.tilt_deg[what]), sc))
+                x, y = self.kit[what][1]
+                if what == "crash":
+                    ang = math.radians(9) * crash * math.sin(2 * math.pi * 3.2 * (t - (self.times["crash"][self.times["crash"] <= t][-1] if crash else 0))) - math.radians(8)
+                elif what == "hat":
+                    y = y - 10 * s * opened + 4 * s * hat
+                    ang = math.radians(3) * hat
+                else:
+                    ang = 0.0
+                blit(frame, img, place(img, anc["center"], (x, y), ang, 1.0))
+            fx, fy = self.kit["floor"][1]
+            fimg = self.kit["floor"][0][0]
+            for dxl in (-0.75, 0.0, 0.8):  # floor tom legs
+                bx = fx + dxl * fimg.shape[1] / 2
+                props.pole(frame, (bx, fy + 150 * s), (bx + dxl * 40 * s, min(H + 20, self.floor_y)), max(3, int(6 * s / 0.72)))
+            for tw, ax in (("tom_mid", -55), ("tom_hi", 55)):  # tom arms out of the bass drum
+                tx, ty = self.kit[tw][1]
+                props.tom_mount(frame, (kx + ax * s, ky - 300 * s), (tx, ty + 75 * s), max(4, int(9 * s / 0.72)))
+            for sgn in (-1, 1):  # spurs on the bass drum
+                props.pole(frame, (kx + sgn * 280 * s, ky + 120 * s), (kx + sgn * 380 * s, min(H + 20, ky + 330 * s)), max(3, int(7 * s / 0.72)))
+            for what in ("floor", "tom_mid", "tom_hi", "snare", "kick"):  # back to front (the snare sits behind the bass drum)
+                img, anc = self.kit[what][0]
+                x, y = self.kit[what][1]
+                hit, _ = decay_since(t, self.times[what], 0.1)
+                sc = 1.0 + 0.02 * hit
+                anchor = anc.get("head", anc.get("center"))
+                blit(frame, img, place(img, anchor, (x, y + 2 * hit), math.radians(self.tilt_deg[what]), sc))
         for side in ("l", "r") if not self.empty else ():
             S, E, Wr, yaw, s_hand, loose = poses[side]
             img, xy, frac = self.hands[side].render(yaw, s_hand, loose, Wr, self.hand_anchor)

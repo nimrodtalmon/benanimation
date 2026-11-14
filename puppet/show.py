@@ -59,11 +59,13 @@ def head_box(j):
 
 class Show:
     def __init__(self, song, band, name, script, logo=None, end_lines=(), marker=0.25, tv=(0.05, 0.25), head=0.45,
-                 style="mix", groove_drums=0.6, flash_cuts=True, tape_trick=2):
+                 style="mix", groove_drums=0.6, flash_cuts=True, tape_trick=2, kit="classic", kit_size=1.15):
+        """kit: a 3D kit (public/kits/<kit>.json, puppet/kit3d.py) or None for the code-drawn one."""
         self.song, self.band, self.name, self.script = song, band, name, os.path.abspath(script)
         self.logo, self.end_lines = logo, list(end_lines)
         self.marker, self.tv, self.head, self.style = marker, tv, head, style
         self.groove_drums, self.flash_cuts, self.tape_trick = groove_drums, flash_cuts, tape_trick
+        self.kit_name, self.kit_size = kit, kit_size
         d = song.data
         self.holes = [tuple(h) for h in d.get("holes", [])]
         self.drums = [m for m in band if m.role == "drums"]
@@ -108,7 +110,8 @@ class Show:
     def kit(self, m, kind):
         from cast.kit_player import KitPlayer
         k = KIT[kind]
-        return KitPlayer(self.song, m.rig, scale=k["scale"], top=k["top"], head=self.head, face=True, groove=self.groove_drums)
+        return KitPlayer(self.song, m.rig, scale=k["scale"], top=k["top"], head=self.head, face=True, groove=self.groove_drums,
+                         kit=self.kit_name, kit_size=self.kit_size)
 
     def make_cast(self):
         cast, wide, duo = {}, [], []

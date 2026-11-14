@@ -51,6 +51,16 @@ Read this first in a new session, then `docs/TOOLKIT.md` (pipeline + lessons).
    Examples: `clips/distorted`, `clips/silence_band`.
 - Rendering ~0.58 s/frame (was 0.91): lines drawn only in their box, fast channel means, 2x supersampled flat hands.
 
+## 3D drum kit (Nov 14, round 7)
+- `puppet/kit3d.py`: the kit is built in Blender (`pip install bpy`, Cycles on the CPU) from `public/kits/<name>.json`
+  (pieces with sizes and places in cm, finishes, camera), rendered once (~5 min) into `out/kitcache/<name>-<hash>/`:
+  a static layer (with floor shadows) and states of the moving cymbals (crash wobble angles, hi-hat heights), each cut
+  where something is in front of it. meta.json maps the render to kit units and gives strike points per hand from 3D.
+- `Drummer(kit="classic", kit_size=1.15)` / `KitPlayer` / `Show(kit=...)` use it; `kit=None` = the old code-drawn kit.
+  kit_size makes the kit bigger next to big-headed cartoon players without re-rendering.
+- Layout lessons: the snare must sit near the middle (the near hand must reach it) and not behind a rack tom (a hit
+  there reads as a tom hit) -> a 4-piece rock kit (one rack tom). Pieces a kit lacks fall back to the nearest one.
+
 ## Feedback (Nov 14)
 - band2: TV effect too much (keep as a dial: `TVStatic(amount, vhs)`); drummer hand looked detached -> fixed (hand sits in the cuff).
 - Ben's band: Distor = drummer, blonde = guitarist (sings most in songs with vocals; all of them sing), bassist = left boys of the band page.

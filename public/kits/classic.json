@@ -1,0 +1,131 @@
+{
+ "about": "A 4-piece rock kit (one rack tom, one floor tom) seen from the audience (right-handed drummer facing the camera). Units: cm. x: viewer's right, y: away from the camera (toward the drummer), z: up. tilt: degrees the head leans toward the drummer.",
+ "shell": "red_sparkle",
+ "kick_skull": "public/clip/skull.png",
+ "drummer_shoulders": [
+  0,
+  64,
+  118
+ ],
+ "camera": {
+  "location": [
+   0,
+   -470,
+   255
+  ],
+  "target": [
+   0,
+   15,
+   80
+  ],
+  "focal_mm": 85,
+  "resolution": [
+   1600,
+   1400
+  ]
+ },
+ "pieces": {
+  "kick": {
+   "type": "kick",
+   "diameter": 56,
+   "depth": 46,
+   "center": [
+    0,
+    0,
+    28
+   ],
+   "lugs": 10
+  },
+  "tom_hi": {
+   "type": "tom",
+   "diameter": 33,
+   "depth": 23,
+   "center": [
+    -8,
+    6,
+    92
+   ],
+   "tilt": 8,
+   "roll": 4,
+   "lugs": 6
+  },
+  "floor": {
+   "type": "floor",
+   "diameter": 40.6,
+   "depth": 40.6,
+   "center": [
+    -60,
+    30,
+    45
+   ],
+   "tilt": 4,
+   "lugs": 8
+  },
+  "snare": {
+   "type": "snare",
+   "diameter": 35.5,
+   "depth": 14,
+   "center": [
+    17,
+    40,
+    64
+   ],
+   "tilt": 5,
+   "roll": -4,
+   "lugs": 10
+  },
+  "hat": {
+   "type": "hihat",
+   "diameter": 35.5,
+   "center": [
+    48,
+    34,
+    90
+   ],
+   "tilt": 4
+  },
+  "crash": {
+   "type": "crash",
+   "diameter": 45.7,
+   "center": [
+    48,
+    12,
+    128
+   ],
+   "tilt": 24,
+   "roll": -10
+  },
+  "ride": {
+   "type": "ride",
+   "diameter": 50.8,
+   "center": [
+    -66,
+    10,
+    106
+   ],
+   "tilt": 14,
+   "roll": 8
+  }
+ },
+ "animated": {
+  "crash": {
+   "wobble_deg": [
+    -9,
+    -6,
+    -3,
+    0,
+    3,
+    6,
+    9
+   ]
+  },
+  "hat": {
+   "lift_cm": [
+    -0.3,
+    0,
+    0.5,
+    1.0
+   ]
+  }
+ }
+}
