@@ -30,7 +30,7 @@ DRUM = dict(KICK=36, SNARE=38, HAT=42, OPEN_HAT=46, CRASH=49, TOM_HI=50, TOM_MID
 class Drummer:
     PARTS = f"{ROOT}/public/parts/pepper"
 
-    def __init__(self, song=None, scale=0.6, cx=W / 2, top=20, empty=False):
+    def __init__(self, song=None, scale=0.6, cx=W / 2, top=20, empty=False, head=1.0):
         """empty=True: only the kit (before she sits down)."""
         self.song = song or Song.default()
         self.empty = empty
@@ -90,7 +90,7 @@ class Drummer:
         self.prev_turn = 0.0
         self.prev_fore = {}
         acc = [(d["t"], 0.5 + 0.5 * d["vel"] / 127) for d in self.song.data["drums"] if d["piece"] in (38, 49) and (d["t"] % self.song.bar) < 0.05 + self.song.bar / 2]
-        self.motion = HeadMotion(7, acc, self.song.duration, self.song.spb, turn_amp=0.35, tilt_amp=2.5, nod_px=7 * scale)
+        self.motion = HeadMotion(7, acc, self.song.duration, self.song.spb, turn_amp=0.35 * head, tilt_amp=2.5 * head, nod_px=7 * scale * head)
 
     def strike_point(self, what, side):
         img, anc = self.kit[what][0]

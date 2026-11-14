@@ -27,7 +27,7 @@ def stage_light(frame, t):
     return frame
 
 
-def finish(frame, t, f, n, rng, credit, zoom=(1.0, 1.06), focus=(W / 2, H * 0.42)):
+def finish(frame, t, f, n, rng, credit, zoom=(1.0, 1.06), focus=(W / 2, H * 0.42), vignette=0.45):
     z = zoom[0] + (zoom[1] - zoom[0]) * f / max(1, n - 1)
     C = cv2.getRotationMatrix2D((focus[0] + 8 * math.sin(t * 0.8), focus[1]), 0, z)
     C[0, 2] += W / 2 - focus[0]  # the focus point is brought to the frame center (a pan)
@@ -35,11 +35,12 @@ def finish(frame, t, f, n, rng, credit, zoom=(1.0, 1.06), focus=(W / 2, H * 0.42
     frame = cv2.warpAffine(frame, C, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
     if not hasattr(finish, "vign"):
         yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
-        finish.vign = (1 - 0.45 * np.clip(((xx - W / 2) / (W * 0.62)) ** 2 + ((yy - H / 2) / (H * 0.7)) ** 2, 0, 1))[..., None]
-    frame = frame * finish.vign + rng.normal(0, 0.018, (H, W, 1)).astype(np.float32)
+        finish.vign = np.clip(((xx - W / 2) / (W * 0.62)) ** 2 + ((yy - H / 2) / (H * 0.7)) ** 2, 0, 1)[..., None]
+    frame = frame * (1 - vignette * finish.vign) + rng.normal(0, 0.018, (H, W, 1)).astype(np.float32)
     frame = np.clip(frame * 255, 0, 255).astype(np.uint8)
+    col = (40, 40, 40) if frame[H - 90:, :600].mean() > 150 else (200, 200, 200)
     for i, line in enumerate(credit):
-        cv2.putText(frame, line, (30, H - 24 - 22 * (len(credit) - 1 - i)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 200, 200), 1, cv2.LINE_AA)
+        cv2.putText(frame, line, (30, H - 24 - 22 * (len(credit) - 1 - i)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, col, 1, cv2.LINE_AA)
     return frame
 
 
@@ -57,11 +58,31 @@ class Stage:
 
     COLORS = [(0.95, 0.45, 0.35), (0.35, 0.55, 1.0), (0.40, 0.95, 0.70), (0.95, 0.35, 0.85)]  # BGR
 
-    def __init__(self, song):
-        self.song = song
+    def __init__(self, song, style="stage"):
+        """style: "stage" (dark, colored beams, spot), "white" (the Clint Eastwood opening: a pale
+        white-blue void, no lights), "night" (a dark blue stormy sky, light rising from the ground)."""
+        self.song, self.style = song, style
+        self.dark = style != "white"
         yy = np.linspace(0, 1, H, dtype=np.float32)[:, None, None]
         self.base = np.broadcast_to((0.07 + 0.09 * yy) * np.array([1.25, 0.9, 1.0], np.float32), (H, W, 3)).copy()
         self.base[int(H * 0.82):] *= 0.55  # floor edge
+        if style == "white":
+            top, bot = np.array([0.985, 0.98, 0.975], np.float32), np.array([0.93, 0.86, 0.80], np.float32)  # BGR, pale blue below
+            k = np.clip((yy - 0.25) / 0.75, 0, 1) ** 1.5
+            self.base = np.broadcast_to(top * (1 - k) + bot * k, (H, W, 3)).astype(np.float32).copy()
+        elif style == "night":
+            rng = np.random.default_rng(3)
+            n = np.zeros((H, W), np.float32)
+            for o, amp in ((8, 1.0), (16, 0.5), (32, 0.25), (64, 0.12)):
+                g = rng.normal(0, 1, (H // (W // o) + 2, o)).astype(np.float32)
+                n += amp * cv2.resize(cv2.GaussianBlur(g, (0, 0), 0.8), (W, H), interpolation=cv2.INTER_CUBIC)
+            n = (n - n.min()) / (n.max() - n.min())
+            clouds = np.clip((n - 0.35) / 0.5, 0, 1)[..., None]
+            sky = np.array([0.20, 0.12, 0.07], np.float32) * (1 - yy) + np.array([0.32, 0.24, 0.14], np.float32) * yy  # navy to slate (BGR)
+            self.base = (sky * (0.65 + 0.7 * clouds)).astype(np.float32)
+            glow = np.exp(-((1 - yy) / 0.22) ** 2) * np.array([0.42, 0.38, 0.22], np.float32)  # cold light from the ground
+            self.base = np.broadcast_to(self.base + glow, (H, W, 3)).copy()
+            self.base[int(H * 0.82):] *= 0.7
         hw, hh = W // 4, H // 4
         self.beams = []
         for i, (x, ang) in enumerate([(0.12, 18), (0.38, 6), (0.62, -6), (0.88, -18)]):
@@ -82,12 +103,16 @@ class Stage:
         """cue (optional): dict(beams=0..1 colored lights, spot=(x, k) a white spotlight at x,
         house=0..1 overall level); a clip sets it per frame (e.g. lights coming up on the chorus)."""
         cue = cue or {}
+        if self.style == "white":
+            return self.base.copy()
         SPB, BAR = self.song.spb, self.song.bar
         ph = (t % SPB) / SPB
         beat = math.exp(-ph * 5)
         bar = int(t / BAR) % 4
         img = self.base.copy()
         bk = cue.get("beams", 1.0)
+        if self.style == "night":
+            bk *= 0.35  # cold, mostly the sky
         for i, (m, col) in enumerate(self.beams):
             k = 0.10 + (0.30 * beat if i == bar else 0.04 * math.sin(t * 0.9 + i))
             img += m * col * k * 1.3 * bk
@@ -139,6 +164,35 @@ def crowd(frame, t, spb, n=13, h=240, seed=4):
 
 
 
+class Looks:
+    """Several looks in a row: Looks(HandDrawn(), TVStatic())."""
+
+    def __init__(self, *looks):
+        self.looks = looks
+
+    def __call__(self, frame, f):
+        for lk in self.looks:
+            frame = lk(frame, f)
+        return frame
+
+
+class TVStatic:
+    """Recorded-TV static multiplied in (Del the ghost in Clint Eastwood): fine noise in horizontal
+    streaks and a slow rolling band, re-drawn every frame."""
+
+    def __init__(self, amount=0.10, seed=0):
+        self.amount = amount
+        self.rng = np.random.default_rng(seed)
+
+    def __call__(self, frame, f):
+        n = self.rng.normal(0, 1, (H // 2, W // 8)).astype(np.float32)
+        n = cv2.resize(n, (W, H), interpolation=cv2.INTER_LINEAR)  # streaky: stretched sideways
+        y = np.arange(H, dtype=np.float32)
+        band = 0.5 + 0.5 * np.sin(2 * np.pi * (y / H * 1.5 - f * 0.013))
+        m = 1 + self.amount * (0.6 * n * (0.5 + band[:, None]) - 0.4 * band[:, None])
+        return frame * m[..., None]
+
+
 class HandDrawn:
     """A hand-drawn finish (look options): line boil (the whole image wobbles a pixel or two and
     re-draws every few frames, like traced drawings), paper grain multiplied in, and a color grade
@@ -187,7 +241,7 @@ class HandDrawn:
 
 class Production:
     def __init__(self, song, cast, shots, name, crowd_in=(), zoom_wide=(1.04, 1.0), zoom=(1.0, 1.05), script=None, cue=None,
-                 look=None, twos=False, crowd_wide=True, drift=0.0, parallax=None, ghost=0.0):
+                 look=None, twos=False, crowd_wide=True, drift=0.0, parallax=None, ghost=0.0, stage="stage"):
         """look: a HandDrawn finish (or None); twos: characters move on twos (15 drawings a second,
         the camera and lights stay smooth), the cadence of hand-drawn 2D."""
         self.song, self.cast_f, self.shots, self.name = song, cast, shots, name
@@ -203,7 +257,7 @@ class Production:
         self.drift, self.parallax, self.ghost = drift, parallax, ghost
         self._prev = None
         self.cast = {}
-        self.stage = Stage(song)
+        self.stage = Stage(song, stage)
 
     def who(self, shot):
         names = shot if isinstance(shot, (tuple, list)) else (shot,)
@@ -230,6 +284,8 @@ class Production:
         if callable(focus):
             focus = focus(t)
         drift = opts.get("drift", self.drift)
+        if callable(drift):  # e.g. a "ladder": calm at the start, bigger moves as the song builds
+            drift = drift(a)
         if drift:
             i = next(j for j, sh in enumerate(self.shots) if sh[0] <= t < sh[1])
             focus = (focus[0] + (k - 0.5) * drift * W * (1 if i % 2 == 0 else -1), focus[1])
@@ -245,13 +301,14 @@ class Production:
             w.draw(frame, tc)
         if (wide and self.crowd_wide) or shot in self.crowd_in:
             crowd(frame, t, self.song.spb)
-        frame = stage_light(frame, t)
+        if self.stage.dark:
+            frame = stage_light(frame, t)
         if self.ghost > 0:
             frame = self.blend_ghost(frame, (a, shot))
         if self.look is not None:
             frame = self.look(frame, f)
         credit = list(dict.fromkeys([w.j["credit"] for w in who])) + [self.song.credit]
-        return finish(frame, t, 0, 1, rng, credit, zoom=(z, z), focus=focus)
+        return finish(frame, t, 0, 1, rng, credit, zoom=(z, z), focus=focus, vignette=0.45 if self.stage.dark else 0.12)
 
     def parallax_bg(self, frame, z, fc):
         """Pre-warp the stage so that, after the camera (zoom z about focus fc), the back wall moves

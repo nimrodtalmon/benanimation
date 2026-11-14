@@ -140,3 +140,8 @@ timing from `song` (never from a global), so it works in any clip with any song.
 - Editing: short loops repeated and played forward/backward, freeze frames for titles.
 - In the toolkit: `Production(drift=0.05, parallax=0.55, ghost=0.35)` (constant camera drift per shot,
   back wall moving less than the band, frame blending on fast motion); `Singer(head=0.6, mouth_twos=True)`.
+- Second pass: the opening's cuts land on bar lines (8, 8, 4, 4, 4, 4 beats at ~86 bpm); the opening camera barely
+  moves (~15-30 px/s at 1920 wide), the graveyard part sweeps several px per frame: camera energy climbs
+  with the song. `Production(drift=lambda t: ...)` takes a per-shot function for such a "ladder".
+- Looks: `Stage(style="white"|"night")`, `TVStatic`, `Looks(a, b)` to chain finishes; `clips/stylereel` renders
+  the same 10 s of the band in several styles for choosing.

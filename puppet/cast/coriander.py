@@ -40,7 +40,7 @@ def soft_poly(shape, pts, s, sigma):
 
 
 class Guitarist:
-    def __init__(self, song=None, scale=0.78, cx=W / 2, top=None):
+    def __init__(self, song=None, scale=0.78, cx=W / 2, top=None, head=1.0):
         self.song = song or Song.default()
         cfg = dict(CORI_HEAD, full="public/paint/coriander-full.png", height=2070 * scale)
         self.p = warp.Puppet(cfg)
@@ -110,7 +110,7 @@ class Guitarist:
         self.fret = Spring(0.0, omega=14.0, zeta=0.8)
         self.prev_turn = 0.0
         acc = [(g["t"], 0.9) for g in self.song.data["guitar"] if g["accent"] and (g["t"] % self.song.bar) < 0.08]
-        self.motion = HeadMotion(3, acc, self.song.duration, self.song.spb, turn_amp=0.4, tilt_amp=3.0, nod_px=6 * scale)
+        self.motion = HeadMotion(3, acc, self.song.duration, self.song.spb, turn_amp=0.4 * head, tilt_amp=3.0 * head, nod_px=6 * scale * head)
 
     def fret_geometry(self, t, fpos, org):
         """Where the fretting hand goes: back of the hand to the audience, fingers up and curled into
