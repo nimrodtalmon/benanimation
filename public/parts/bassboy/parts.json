@@ -70,7 +70,7 @@
    200,
    238
   ],
-  "length": 210
+  "length": 250
  },
  "upper_arm": {
   "file": "upper_arm.png",
@@ -86,22 +86,22 @@
  "forearm": {
   "file": "forearm.png",
   "elbow": [
-   86.0,
-   76.25
+   89.0,
+   71.25
   ],
   "wrist": [
-   86.0,
-   410.65
+   89.0,
+   436.05
   ]
  },
  "shoulders": {
   "left": [
    260,
-   920
+   950
   ],
   "right": [
    820,
-   920
+   950
   ]
  },
  "arm_width": 125

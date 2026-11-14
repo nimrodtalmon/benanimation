@@ -35,60 +35,91 @@ END = LAST_HIT + 0.25  # the end card comes up after the last hit
 CRASH = np.array([d["t"] for d in D["drums"] if d["piece"] == 49])
 STOPS = [h for h in HOLES if 60 < h[0] < 70]  # the stop-time section: flashes when the band comes back
 
-HEAD = 0.6
+HEAD = 0.45  # Clint Eastwood: heads nearly still (the drummer's too)
 CAST = {
-    "drums": lambda: DistorDrummer(song, head=HEAD, face=True, groove=1.0),
-    "drums_close": lambda: DistorDrummer(song, scale=0.85, top=-60, head=HEAD, face=True, groove=1.0),
-    "guitar": lambda: BustPlayer(song, "blonde", "guitar", scale=0.40, top=30, head=HEAD, seed=3),
-    "guitar_close": lambda: BustPlayer(song, "blonde", "guitar", scale=0.62, top=-60, head=HEAD, seed=3),
-    "bass": lambda: BustPlayer(song, "bassboy", "bass", scale=0.55, top=40, head=HEAD, seed=5),
-    "bass_close": lambda: BustPlayer(song, "bassboy", "bass", scale=0.80, top=-90, head=HEAD, seed=5),
+    "drums": lambda: DistorDrummer(song, head=HEAD, face=True, groove=0.0),
+    "drums_close": lambda: DistorDrummer(song, scale=0.85, top=-60, head=HEAD, face=True, groove=0.0),
+    "guitar": lambda: BustPlayer(song, "blonde", "guitar", scale=0.40, top=30, head=HEAD, seed=3, style="ce"),
+    "guitar_close": lambda: BustPlayer(song, "blonde", "guitar", scale=0.62, top=-60, head=HEAD, seed=3, style="ce"),
+    "bass": lambda: BustPlayer(song, "bassboy", "bass", scale=0.55, top=40, head=HEAD, seed=5, style="ce"),
+    "bass_close": lambda: BustPlayer(song, "bassboy", "bass", scale=0.80, top=-90, head=HEAD, seed=5, style="ce"),
     # the wide shot: drums at the back, guitar and bass in front, bodies running off the bottom
-    "w_drums": lambda: DistorDrummer(song, scale=0.36, top=150, head=HEAD, face=True, groove=1.0),
-    "w_guitar": lambda: BustPlayer(song, "blonde", "guitar", scale=0.25, cx=W * 0.24, top=400, head=HEAD, seed=3),
-    "w_bass": lambda: BustPlayer(song, "bassboy", "bass", scale=0.34, cx=W * 0.77, top=330, head=HEAD, seed=5),
+    "w_drums": lambda: DistorDrummer(song, scale=0.36, top=150, head=HEAD, face=True, groove=0.0),
+    "w_guitar": lambda: BustPlayer(song, "blonde", "guitar", scale=0.25, cx=W * 0.24, top=400, head=HEAD, seed=3, style="ce"),
+    "w_bass": lambda: BustPlayer(song, "bassboy", "bass", scale=0.34, cx=W * 0.77, top=330, head=HEAD, seed=5, style="ce"),
     # the two front players side by side
-    "d_guitar": lambda: BustPlayer(song, "blonde", "guitar", scale=0.33, cx=W * 0.30, top=170, head=HEAD, seed=3),
-    "d_bass": lambda: BustPlayer(song, "bassboy", "bass", scale=0.45, cx=W * 0.72, top=110, head=HEAD, seed=5),
+    "d_guitar": lambda: BustPlayer(song, "blonde", "guitar", scale=0.33, cx=W * 0.30, top=170, head=HEAD, seed=3, style="ce"),
+    "d_bass": lambda: BustPlayer(song, "bassboy", "bass", scale=0.45, cx=W * 0.72, top=110, head=HEAD, seed=5, style="ce"),
 }
 WIDE = ("w_drums", "w_guitar", "w_bass")
 DUO = ("d_guitar", "d_bass")
 
 
-def pan(x0, x1, a, b, y=H * 0.42):
-    return lambda t: (x0 + (x1 - x0) * min(1.0, max(0.0, (t - a) / (b - a))), y)
+def hole_in(a, b):
+    return [h for h in HOLES if a - 0.05 <= h[0] < b]
+
+
+def freeze_at(t0):
+    return lambda t: t0
+
+
+def rock(a, spb):
+    """Clint Eastwood's tape trick over one bar: beats 1-2 as played, beat 3 runs backward over beat 2,
+    beat 4 plays beat 2 forward again (the audio keeps going)."""
+    def f(t):
+        u = t - a
+        if u < 2 * spb:
+            return t
+        if u < 3 * spb:
+            return a + 2 * spb - (u - 2 * spb)
+        return a + spb + (u - 3 * spb)
+    return f
 
 
 def shot_list():
-    """Cuts on bar lines. Intro: the bass alone, two bars per shot, slow moves. From the drums on:
-    a cycle of angles, one bar each, each with its own small move (push in, pull out, pan)."""
+    """Cut like Clint Eastwood (measured from the video): a calm opening with long shots (two bars,
+    ~3.8 s) and a still camera; one bar per shot once the band plays; freeze frames on the stop-time
+    breaks; twice a bar played forward/backward; flash cuts (a half bar, then two quarter bars) in
+    the last part, where the camera also moves most."""
+    spb = song.spb
     bars = D["beats"][::4] + [song.duration + 1]
-    intro = [("bass", dict(zoom=(1.0, 1.06))), (WIDE, "pan"), ("bass_close", dict(zoom=(1.0, 1.08))),
-             ("bass", dict(zoom=(1.08, 1.0))), (WIDE, "pan"), ("bass_close", dict(zoom=(1.04, 1.1))), ("bass", dict(zoom=(1.0, 1.05)))]
-    cycle = [("drums", dict(zoom=(1.12, 1.0))), (WIDE, "pan"), ("guitar", dict(zoom=(1.0, 1.07))), ("bass", dict(zoom=(1.07, 1.0))),
-             ("drums_close", dict(zoom=(1.0, 1.06))), (DUO, "pan"), ("guitar_close", dict(zoom=(1.06, 1.0))), (WIDE, "pan"),
-             ("bass_close", dict(zoom=(1.0, 1.07))), ("drums", dict(zoom=(1.0, 1.05))), (DUO, "pan"), ("guitar", dict(zoom=(1.07, 1.0)))]
-    shots, i, k, kc, flip = [], 0, 0, 0, 1
+    intro = ["bass", WIDE, "bass_close", "bass", WIDE, "bass_close", "bass"]
+    cycle = ["drums", WIDE, "guitar", "bass", "drums_close", DUO, "guitar_close", WIDE, "bass_close", "drums", DUO, "guitar"]
+    flash = ["guitar_close", "drums_close", "bass_close", "drums", "guitar", "bass"]
+    shots, i, k, kc, kf, nrock = [], 0, 0, 0, 0, 0
     t0 = 0.0
     while i < len(bars) - 1:
-        if bars[i] < DRUMS_IN - 0.3:  # intro: two bars per shot
+        if bars[i] < DRUMS_IN - 0.3:  # intro: two bars per shot, slow pushes
             j = min(i + 2, len(bars) - 1)
             while bars[j] > DRUMS_IN - 0.3 and j > i + 1:
                 j -= 1
-            who, opts = intro[k % len(intro)]
+            shots.append((t0, bars[j], intro[k % len(intro)], dict(zoom=(1.0, 1.04) if k % 2 == 0 else (1.04, 1.0))))
             k += 1
+            t0, i = bars[j], j
+            continue
+        t1 = bars[i + 1]
+        who = cycle[kc % len(cycle)]
+        kc += 1
+        hs = hole_in(t0, t1)
+        if hs and t0 >= DRUMS_IN + 1:  # a break inside this bar: play up to it, then freeze on its first frame
+            a_, b_ = hs[0]
+            shots.append((t0, a_, who, {}))
+            shots.append((a_, min(t1, b_ + 0.02), who, dict(tmap=freeze_at(a_ + 0.03))))
+            if b_ + 0.02 < t1:
+                shots.append((b_ + 0.02, t1, cycle[kc % len(cycle)], {}))
+                kc += 1
+        elif 68 <= t0 < END - 2:  # flash cuts
+            q = (t1 - t0) / 4
+            for (u0, u1) in ((0, 2), (2, 3), (3, 4)):
+                shots.append((t0 + u0 * q, t0 + u1 * q, flash[kf % len(flash)], {}))
+                kf += 1
+        elif 46 <= t0 < 60 and who in (WIDE, DUO) and nrock < 2:  # the tape trick, twice
+            shots.append((t0, t1, who, dict(tmap=rock(t0, spb))))
+            nrock += 1
         else:
-            j = i + 1
-            who, opts = cycle[kc % len(cycle)]
-            kc += 1
-        t1 = bars[j]
-        if opts == "pan":
-            flip = -flip
-            x0, x1 = (W * 0.40, W * 0.60) if flip > 0 else (W * 0.60, W * 0.40)
-            opts = dict(focus=pan(x0, x1, t0, t1), zoom=(1.06, 1.06))
-        shots.append((t0, t1, who, opts))
-        t0, i = t1, j
-    return shots
+            shots.append((t0, t1, who, {}))
+        t0, i = t1, i + 1
+    return [sh for sh in shots if sh[1] - sh[0] > 0.02]
 
 
 SHOTS = shot_list()
@@ -166,8 +197,8 @@ def post(img, t):
 
 prod = Production(song, CAST, SHOTS, name="distorted", script=os.path.abspath(__file__),
                   look=Looks(HandDrawn(), TVStatic(0.05, vhs=0.25)), stage="stage", crowd_wide=False, cue=cue,
-                  drift=lambda a: 0.05 if a < 44 else (0.065 if a < 68 else 0.085),  # more camera as the song builds
-                  parallax=0.55, ghost=0.35, punch=(CRASH, 0.04), roll=0.6, backdrop=backdrop, fore=fore, post=post)
+                  drift=lambda a: 0.015 if a < DRUMS_IN else (0.05 if a < 44 else (0.065 if a < 68 else 0.09)),  # camera energy climbs
+                  parallax=0.55, ghost=0.35, backdrop=backdrop, fore=fore, post=post)
 
 if __name__ == "__main__":
     prod.main(sys.argv)

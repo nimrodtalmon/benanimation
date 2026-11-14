@@ -34,10 +34,10 @@ CHARS = {
         shirt_top=1180,  # the shirt shows from here down (between the lapels): glare removed  # where the jacket meets the left / right page edge (y)
         shirt=(612, 935),  # x range of the shirt between the lapels at the bottom edge
         jacket_bgr=(244, 244, 244), shade_bgr=(70, 120, 200), skin_bgr=(228, 226, 224),
-        shoulders=dict(left=(150, 1390), right=(1360, 1400)),
+        shoulders=dict(left=(110, 1420), right=(1400, 1430)),
         arm=dict(upper=610, fore=520, width=150),
         dark_eyes=True,  # the eye sockets are solid black marker: the flash glare is removed
-        hand_length=300,
+        hand_length=360,
         head=dict(head_ells=[(820, 560, 520, 440), (800, 860, 430, 330)], neck=(610, 910, 1000, 1290),
                   face=(815, 690, 390, 450), pivot=(770, 1010), mouth=(760, 935, 200, 40), chin=990,
                   eyes=[(570, 600, 140, 125), (1000, 590, 145, 125)], lid_from=150, lash=(20, 18, 19), lash_w=14,
@@ -53,9 +53,9 @@ CHARS = {
                 (1040, 1150), (1085, 1240), (1115, 1330), (1125, 1500), (1118, 1999)],
         pad=120, ext=500,
         jacket_bgr=(236, 236, 238), shade_bgr=(150, 150, 160), skin_bgr=(150, 200, 238), line_bgr=(95, 95, 100),
-        shoulders=dict(left=(520, 1340), right=(1080, 1340)),
+        shoulders=dict(left=(520, 1370), right=(1080, 1370)),
         arm=dict(upper=430, fore=380, width=125),
-        hand_length=210,
+        hand_length=250,
         head=dict(head_ells=[(790, 730, 340, 270), (790, 960, 290, 300)], neck=(690, 900, 1180, 1300),
                   face=(790, 900, 270, 330), pivot=(780, 1150), mouth=(760, 990, 110, 30), chin=1230,
                   eyes=[(640, 830, 60, 25), (860, 840, 60, 25)], lid_from=150, lash=(20, 18, 19), lash_w=10,
@@ -258,21 +258,38 @@ def body_hoodie(c):
 
 
 def sleeve(c, length, r0, r1, joint0, cuff=False, seed=0):
-    """One arm part: a white sleeve (capsule) with crayon shading along one side and ink outline."""
+    """One arm part: a sleeve with crayon shading along one side and an ink outline. The upper arm
+    is a tapered capsule (its top hides behind the body). The forearm widens a little toward an open,
+    flat cuff (the hand comes out of it, drawn under the sleeve), with a cuff band and a crease."""
     wdt = int(2 * max(r0, r1) + 60)
     h = int(length + 2 * max(r0, r1) + 60)
     img = np.zeros((h, wdt, 4), np.float32)
     A = (wdt / 2, joint0)
     B = (wdt / 2, joint0 + length)
-    out = capsule(A, r0, B, r1, bulge=5)
-    m = fill(img, out, jacket_tex(h, wdt, c["jacket_bgr"], seed), seed)
-    crayon(img, m, (1, 0.2), c["shade_bgr"], 0.45 * r0, 0.6, seed + 1)
     lw, lc = (6, c["line_bgr"]) if c.get("line_bgr") else (10, None)
-    stroke(img, out, lw, closed=True, seed=seed + 2, color=lc)
-    if cuff:  # cuff seam near the wrist
-        y = joint0 + length - 0.18 * length
-        stroke(img, arc((wdt / 2, y), r1 * 0.98, 0.3 * r1, math.radians(10), math.radians(170)), lw - 2, seed=seed + 3, color=lc)
-    return img, A, B
+    if not cuff:
+        out = capsule(A, r0, B, r1, bulge=4)
+        m = fill(img, out, jacket_tex(h, wdt, c["jacket_bgr"], seed), seed)
+        crayon(img, m, (1, 0.2), c["shade_bgr"], 0.45 * r0, 0.6, seed + 1)
+        stroke(img, out, lw, closed=True, seed=seed + 2, color=lc)
+        # the top grows out of the jacket's shoulder: no cap, the sleeve fades in over its first part
+        yy = np.arange(h, dtype=np.float32)[:, None]
+        img[..., 3] *= np.clip((yy - (A[1] - 0.1 * r0)) / (0.9 * r0), 0, 1)
+        return img, A, B
+    # forearm: elbow end round, the wrist end an open flat cuff
+    cx, y0, y1 = wdt / 2, joint0, joint0 + length
+    left = [(cx - r0 - 2 * math.sin(math.pi * t) - (r1 - r0) * t, y0 + length * t) for t in np.linspace(0, 1, 40)]
+    right = [(cx + r0 + 2 * math.sin(math.pi * t) + (r1 - r0) * t, y0 + length * t) for t in np.linspace(1, 0, 40)]
+    cap = [(cx + r0 * math.cos(a_), y0 - r0 * math.sin(a_)) for a_ in np.linspace(0, math.pi, 30)]
+    poly = np.array(left + [(cx + r1, y1)] + right + cap[::-1], float)
+    poly = np.array(left + [(cx - r1, y1), (cx + r1, y1)] + right + cap, float)
+    m = fill(img, poly, jacket_tex(h, wdt, c["jacket_bgr"], seed), seed)
+    crayon(img, m, (1, 0.2), c["shade_bgr"], 0.45 * r0, 0.6, seed + 1)
+    stroke(img, np.array(right + cap + left, float), lw, seed=seed + 2, color=lc)  # the sides and the elbow end
+    stroke(img, [(cx - r1, y1), (cx + r1, y1)], lw, seed=seed + 6, color=lc)  # the cuff's open edge
+    band = y1 - 0.16 * length  # the cuff band
+    stroke(img, [(cx - r1 + 4, band), (cx, band + 6), (cx + r1 - 4, band)], max(3, lw - 3), seed=seed + 3, color=lc)
+    return img, A, (cx, y1)
 
 
 def main(name):
@@ -285,7 +302,7 @@ def main(name):
     ar = c["arm"]
     r = ar["width"] / 2
     up, S, E = sleeve(c, ar["upper"], r, 0.9 * r, r + 20, seed=40)
-    fo, E2, Wr = sleeve(c, ar["fore"], 0.9 * r, 0.82 * r, 0.9 * r + 20, cuff=True, seed=50)
+    fo, E2, Wr = sleeve(c, ar["fore"], 0.82 * r, 0.95 * r, 0.82 * r + 20, cuff=True, seed=50)
     save(f"{out}/upper_arm.png", up)
     save(f"{out}/forearm.png", fo)
     pad = c["pad"]
@@ -301,7 +318,7 @@ def main(name):
     j = dict(credit=c["credit"], pad=pad, src_h=b.shape[0], head=hd,
              hand=dict(skin_bgr=list(c["skin_bgr"]), length=c["hand_length"]),
              upper_arm=dict(file="upper_arm.png", shoulder=[S[0], S[1]], elbow=[E[0], E[1]]),
-             forearm=dict(file="forearm.png", elbow=[E2[0], E2[1]], wrist=[Wr[0], Wr[1] - 0.12 * ar["fore"]]),
+             forearm=dict(file="forearm.png", elbow=[E2[0], E2[1]], wrist=[Wr[0], Wr[1] - 0.04 * ar["fore"]]),
              shoulders=dict(left=[c["shoulders"]["left"][0] + pad, c["shoulders"]["left"][1]],
                             right=[c["shoulders"]["right"][0] + pad, c["shoulders"]["right"][1]]),
              arm_width=ar["width"])

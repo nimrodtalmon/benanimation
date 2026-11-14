@@ -33,8 +33,11 @@ def _settle(u, tau, freq):
 
 
 class Groove:
-    def __init__(self, song, seed=0, amount=1.0, sway=2.2, bounce=6.0, nod=9.0, step=10.0, lean=2.0):
-        self.song, self.amount = song, amount
+    def __init__(self, song, seed=0, amount=1.0, sway=2.2, bounce=6.0, nod=9.0, step=10.0, lean=2.0, style="rock"):
+        """style "rock": sway, dips and head-banging. style "ce" (Clint Eastwood, measured from the
+        video): the body is held; the head drifts at a constant speed (turn and tilt as slow
+        triangle waves, ~6 s per leg, never stopping), no nods; only the hands play."""
+        self.song, self.amount, self.style = song, amount, style
         self.k = dict(sway=sway, bounce=bounce, nod=nod, step=step, lean=lean)
         d = song.data
         self.beats = np.array(d.get("beats") or np.arange(0, song.duration, song.spb))
@@ -74,6 +77,8 @@ class Groove:
         return None
 
     def at(self, t):
+        if self.style == "ce":
+            return self.at_ce(t)
         A, k, song = self.amount, self.k, self.song
         e = self.e(t)
         bar = song.bar
@@ -109,3 +114,11 @@ class Groove:
         nod = nod * (1 - hf) - 6 * kick
         dx = dx * (1 - 0.5 * hf)
         return dict(rot=A * rot, dx=A * dx, dy=A * dy, nod=A * nod, energy=e, hole=hf > 0.5)
+
+    def at_ce(self, t):
+        tri = lambda x: 2 * abs(2 * (x - math.floor(x + 0.5))) - 1  # noqa: E731  -1..1, constant speed
+        p = self.phase
+        turn = 0.35 * tri(t / 11.4 + p[0] / 6.3)  # one leg ~5.7 s
+        tilt = 2.2 * tri(t / 13.0 + p[1] / 6.3)
+        dx = 4.0 * tri(t / 17.0 + p[2] / 6.3)
+        return dict(rot=0.0, dx=float(self.amount * dx), dy=0.0, nod=0.0, turn=float(self.amount * turn), tilt=float(self.amount * tilt), energy=self.e(t), hole=False)

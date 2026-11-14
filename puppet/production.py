@@ -295,6 +295,8 @@ class Production:
         """A shot is (t0, t1, who) or (t0, t1, who, opts); opts: zoom=(start, end), focus=(x, y) or
         focus(t) -> (x, y) for a pan."""
         a, b, shot, opts = self.shot_at(t)
+        if "tmap" in opts:  # editing tricks: tmap(t) -> the moment shown (a freeze frame, a loop played back and forth)
+            t = opts["tmap"](t)
         wide = isinstance(shot, (tuple, list))
         frame = self.stage.frame(t, wide, self.cue(t, shot) if self.cue else None)
         if self.backdrop:
