@@ -79,6 +79,8 @@ class Groove:
     def at(self, t):
         if self.style == "ce":
             return self.at_ce(t)
+        if self.style == "mix":
+            return self.at_mix(t)
         A, k, song = self.amount, self.k, self.song
         e = self.e(t)
         bar = song.bar
@@ -122,3 +124,18 @@ class Groove:
         tilt = 2.2 * tri(t / 13.0 + p[1] / 6.3)
         dx = 4.0 * tri(t / 17.0 + p[2] / 6.3)
         return dict(rot=0.0, dx=float(self.amount * dx), dy=0.0, nod=0.0, turn=float(self.amount * turn), tilt=float(self.amount * tilt), energy=self.e(t), hole=False)
+
+    def at_mix(self, t):
+        """Calm (Clint Eastwood drift) when the band is quiet; when it plays hard, the head bangs on
+        the beat (bar starts harder) and the body rocks a little, more in loud passages."""
+        ce = self.at_ce(t)
+        self.style = "rock"
+        try:
+            r = self.at(t)
+        finally:
+            self.style = "mix"
+        e = r["energy"]
+        w = min(1.0, max(0.0, (e - 0.45) / 0.35))  # how much of the rock moves to use now
+        return dict(rot=0.6 * r["rot"] * w + (r["rot"] if r["hole"] else 0.0) * (1 - w), dx=ce["dx"] + 0.4 * r["dx"] * w,
+                    dy=0.7 * r["dy"] * w, nod=1.1 * r["nod"] * w + (r["nod"] if r["hole"] else 0.0) * (1 - w),
+                    turn=ce["turn"] * (1 - 0.5 * w), tilt=ce["tilt"], energy=e, hole=r["hole"])

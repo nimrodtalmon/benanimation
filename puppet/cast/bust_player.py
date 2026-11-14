@@ -16,7 +16,7 @@ import props
 import warp
 from cast.distor import arms
 from groove import Groove
-from motion import HeadMotion, Spring, decay_since
+from motion import Face, HeadMotion, Spring, decay_since
 from props import blit, place
 from warp import over_sub
 
@@ -34,7 +34,10 @@ BASS = dict(neck=2.0, burst=((0.20, 0.20, 0.75), (0.08, 0.06, 0.10)), n_strings=
 
 
 class BustPlayer:
-    def __init__(self, song, name, instrument="guitar", scale=0.5, cx=W / 2, top=0, head=1.0, seed=3, groove=1.0, style="rock"):
+    def __init__(self, song, name, instrument="guitar", scale=0.5, cx=W / 2, top=0, head=1.0, seed=3, groove=1.0, style="rock",
+                 face=True, shouts=()):
+        """face: expressions from the music (smile in loud parts, brows up on accents, a shout at
+        each time in shouts, e.g. where the band comes back in)."""
         """groove: how much the body moves with the music (puppet/groove.py; 0 = still)."""
         self.song, self.name, self.inst = song, name, instrument
         parts = f"{ROOT}/public/parts/{name}"
@@ -50,6 +53,8 @@ class BustPlayer:
                    face=(sx(hd["face"][0]),) + tuple(hd["face"][1:]), pivot=(sx(hd["pivot"][0]), hd["pivot"][1]),
                    mouth=(sx(hd["mouth"][0]),) + tuple(hd["mouth"][1:]),
                    eyes=[(sx(x), y, rx, ry) for x, y, rx, ry in hd["eyes"]])
+        if "lid_color" in hd:
+            cfg["lid_color"] = (sx(hd["lid_color"][0]), hd["lid_color"][1])
         self.p = warp.Puppet(cfg)
         self.s = scale
         b = BODY[name]
@@ -84,6 +89,10 @@ class BustPlayer:
         self.fret = Spring(0.0, omega=14.0, zeta=0.8)
         acc = [(t, 0.9) for t, _, a in ev if a > 0.9 and (t % song.bar) < 0.08]
         self.groove = Groove(song, seed=seed, amount=groove, style=style) if groove else None
+        crashes = [d["t"] for d in song.data.get("drums", []) if d["piece"] == 49]
+        self.face = Face(song, accents=crashes, hits=list(self.hit_t), base_smile=0.05, seed=seed) if face else None
+        self.shouts = np.sort(np.asarray(shouts, float))
+        self.blinks = self.j["head"].get("lid_from") is not None and name != "blonde"  # drawn eye sockets don't blink
         self.motion = HeadMotion(seed, acc, song.duration, song.spb, turn_amp=0.4 * head, tilt_amp=3.0 * head, nod_px=8 * scale / 0.5 * head)
 
     def credit(self):
@@ -118,7 +127,15 @@ class BustPlayer:
         gv0 = self.groove.at(t) if self.groove else {}
         if "turn" in gv0:  # Clint Eastwood: the head only drifts
             turn, tilt, nod, sway = gv0["turn"], gv0["tilt"], 0.0, 0.0
-        fig = p.head_frame(turn, 0.0, "ah", 0.0, sway)  # no blink: the eyes are drawn sockets
+        mouth, smile, brow, squint = 0.0, 0.0, 0.0, 0.0
+        if self.face is not None:
+            e = self.face.at(t)
+            en = gv0.get("energy", 0.5) if gv0 else 0.5
+            shout, _ = decay_since(t, self.shouts, 0.45) if len(self.shouts) else (0.0, 0)
+            mouth = min(0.85, e["mouth"] + 0.75 * shout)
+            smile = min(1.0, e["smile"] + 0.45 * en - 0.3 * shout)
+            brow, squint = min(1.0, e["brow"] + 0.6 * shout), e["squint"] + 0.25 * shout
+        fig = p.head_frame(turn, mouth, "ah", min(1.0, blink + squint) if self.blinks else 0.0, sway, smile=smile, brow=brow)
         gv = gv0 if gv0 else dict(rot=0.0, dx=0.0, dy=0.0, nod=0.0)
         u = s / 0.5  # groove units are px at scale 0.5
         nod = nod + gv["nod"] * u
@@ -178,7 +195,7 @@ class BustPlayer:
         dist = np.array([np.hypot(*(nk0 + (nk1 - nk0) * f + off + dfin * sink - Sr)) for f in fr])
         ok = fr[dist < reach]
         lo, hi = (float(ok.min()), float(ok.max())) if len(ok) else (0.1, 0.3)
-        frac = lo + (hi - lo) * (0.2 + 0.6 * self.fret_target(t))
+        frac = lo + (hi - lo) * (0.45 + 0.5 * self.fret_target(t))  # well out on the neck, so the forearm runs under it
         at = nk0 + (nk1 - nk0) * frac
         tgt_r = at + off + dfin * sink
         Er, Wrr = Lr.solve(Sr, tgt_r, s)
@@ -204,6 +221,10 @@ class BustPlayer:
             lay, (x, y) = L.render(S_, E_, Wr_, s, (W, H), part="upper")
             if lay is not None:
                 warp.over(frame, lay, x, y)
+        # the fretting forearm runs behind the neck: drawn before the guitar (only the fingers show on top)
+        lay, (x, y) = Lr.render(Sr, Er, Wrr, s, (W, H), part="fore")
+        if lay is not None:
+            warp.over(frame, lay, x, y)
         shoulder = W_(b["strap_shoulder"])
         props.strap(frame, [horn, horn * 0.4 + shoulder * 0.6 + np.array([-30, 10]) * s, shoulder], sw)
         # the guitar's shadow on the jacket
@@ -216,9 +237,6 @@ class BustPlayer:
         props.button(frame, horn, 7 * s)
         img, xy, fr_ = self.fret_hand.render(pose, Rf, self.hsize, fret_at, anchor=neck_c)
         over_sub(frame, img, xy, fr_)
-        lay, (x, y) = Lr.render(Sr, Er, Wrr, s, (W, H), part="fore")
-        if lay is not None:
-            warp.over(frame, lay, x, y)
         img, xy, fr_ = self.pick_hand.render(handrig.POSES["pick"], Rs, self.hsize, pick_at, anchor=pick, held=held)
         over_sub(frame, img, xy, fr_)
         lay, (x, y) = Ll.render(Sl, El, Wrl, s, (W, H), part="fore")

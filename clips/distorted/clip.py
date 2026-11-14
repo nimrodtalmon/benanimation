@@ -34,22 +34,23 @@ LAST_HIT = max(d["t"] for d in D["drums"])
 END = LAST_HIT + 0.25  # the end card comes up after the last hit
 CRASH = np.array([d["t"] for d in D["drums"] if d["piece"] == 49])
 STOPS = [h for h in HOLES if 60 < h[0] < 70]  # the stop-time section: flashes when the band comes back
+SHOUTS = [DRUMS_IN] + [b for a, b in STOPS]  # the players shout where the band crashes back in
 
-HEAD = 0.45  # Clint Eastwood: heads nearly still (the drummer's too)
+HEAD = 0.45  # heads drift calmly (Clint Eastwood); in loud parts they bang on the beat (groove style 'mix')
 CAST = {
-    "drums": lambda: DistorDrummer(song, head=HEAD, face=True, groove=0.0),
-    "drums_close": lambda: DistorDrummer(song, scale=0.85, top=-60, head=HEAD, face=True, groove=0.0),
-    "guitar": lambda: BustPlayer(song, "blonde", "guitar", scale=0.40, top=30, head=HEAD, seed=3, style="ce"),
-    "guitar_close": lambda: BustPlayer(song, "blonde", "guitar", scale=0.62, top=-60, head=HEAD, seed=3, style="ce"),
-    "bass": lambda: BustPlayer(song, "bassboy", "bass", scale=0.55, top=40, head=HEAD, seed=5, style="ce"),
-    "bass_close": lambda: BustPlayer(song, "bassboy", "bass", scale=0.80, top=-90, head=HEAD, seed=5, style="ce"),
+    "drums": lambda: DistorDrummer(song, head=HEAD, face=True, groove=0.6),
+    "drums_close": lambda: DistorDrummer(song, scale=0.85, top=-60, head=HEAD, face=True, groove=0.6),
+    "guitar": lambda: BustPlayer(song, "blonde", "guitar", scale=0.40, top=30, head=HEAD, seed=3, style="mix", shouts=SHOUTS),
+    "guitar_close": lambda: BustPlayer(song, "blonde", "guitar", scale=0.62, top=-60, head=HEAD, seed=3, style="mix", shouts=SHOUTS),
+    "bass": lambda: BustPlayer(song, "bassboy", "bass", scale=0.55, top=40, head=HEAD, seed=5, style="mix", shouts=SHOUTS),
+    "bass_close": lambda: BustPlayer(song, "bassboy", "bass", scale=0.80, top=-90, head=HEAD, seed=5, style="mix", shouts=SHOUTS),
     # the wide shot: drums at the back, guitar and bass in front, bodies running off the bottom
-    "w_drums": lambda: DistorDrummer(song, scale=0.36, top=150, head=HEAD, face=True, groove=0.0),
-    "w_guitar": lambda: BustPlayer(song, "blonde", "guitar", scale=0.25, cx=W * 0.24, top=400, head=HEAD, seed=3, style="ce"),
-    "w_bass": lambda: BustPlayer(song, "bassboy", "bass", scale=0.34, cx=W * 0.77, top=330, head=HEAD, seed=5, style="ce"),
+    "w_drums": lambda: DistorDrummer(song, scale=0.36, top=150, head=HEAD, face=True, groove=0.6),
+    "w_guitar": lambda: BustPlayer(song, "blonde", "guitar", scale=0.25, cx=W * 0.24, top=400, head=HEAD, seed=3, style="mix", shouts=SHOUTS),
+    "w_bass": lambda: BustPlayer(song, "bassboy", "bass", scale=0.34, cx=W * 0.77, top=330, head=HEAD, seed=5, style="mix", shouts=SHOUTS),
     # the two front players side by side
-    "d_guitar": lambda: BustPlayer(song, "blonde", "guitar", scale=0.33, cx=W * 0.30, top=170, head=HEAD, seed=3, style="ce"),
-    "d_bass": lambda: BustPlayer(song, "bassboy", "bass", scale=0.45, cx=W * 0.72, top=110, head=HEAD, seed=5, style="ce"),
+    "d_guitar": lambda: BustPlayer(song, "blonde", "guitar", scale=0.33, cx=W * 0.30, top=170, head=HEAD, seed=3, style="mix", shouts=SHOUTS),
+    "d_bass": lambda: BustPlayer(song, "bassboy", "bass", scale=0.45, cx=W * 0.72, top=110, head=HEAD, seed=5, style="mix", shouts=SHOUTS),
 }
 WIDE = ("w_drums", "w_guitar", "w_bass")
 DUO = ("d_guitar", "d_bass")

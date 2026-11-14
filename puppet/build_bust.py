@@ -35,9 +35,9 @@ CHARS = {
         shirt=(612, 935),  # x range of the shirt between the lapels at the bottom edge
         jacket_bgr=(244, 244, 244), shade_bgr=(70, 120, 200), skin_bgr=(228, 226, 224),
         shoulders=dict(left=(110, 1420), right=(1400, 1430)),
-        arm=dict(upper=610, fore=520, width=150),
+        arm=dict(upper=680, fore=600, width=195),
         dark_eyes=True,  # the eye sockets are solid black marker: the flash glare is removed
-        hand_length=360,
+        hand_length=430,
         head=dict(head_ells=[(820, 560, 520, 440), (800, 860, 430, 330)], neck=(610, 910, 1000, 1290),
                   face=(815, 690, 390, 450), pivot=(770, 1010), mouth=(760, 935, 200, 40), chin=990,
                   eyes=[(570, 600, 140, 125), (1000, 590, 145, 125)], lid_from=150, lash=(20, 18, 19), lash_w=14,
@@ -53,12 +53,12 @@ CHARS = {
                 (1040, 1150), (1085, 1240), (1115, 1330), (1125, 1500), (1118, 1999)],
         pad=120, ext=500,
         jacket_bgr=(236, 236, 238), shade_bgr=(150, 150, 160), skin_bgr=(150, 200, 238), line_bgr=(95, 95, 100),
-        shoulders=dict(left=(520, 1370), right=(1080, 1370)),
-        arm=dict(upper=430, fore=380, width=125),
-        hand_length=250,
+        shoulders=dict(left=(540, 1415), right=(1060, 1415)),
+        arm=dict(upper=480, fore=430, width=160),
+        hand_length=300,
         head=dict(head_ells=[(790, 730, 340, 270), (790, 960, 290, 300)], neck=(690, 900, 1180, 1300),
                   face=(790, 900, 270, 330), pivot=(780, 1150), mouth=(760, 990, 110, 30), chin=1230,
-                  eyes=[(640, 830, 60, 25), (860, 840, 60, 25)], lid_from=150, lash=(20, 18, 19), lash_w=10,
+                  eyes=[(640, 830, 60, 25), (860, 840, 60, 25)], lid_from=150, lid_color=(905, 925), lash=(20, 18, 19), lash_w=10,
                   hair_from=860, turn_px=14),
     ),
 }
@@ -314,6 +314,8 @@ def main(name):
                   face=(hd["face"][0] - cx0, hd["face"][1] - cy0) + tuple(hd["face"][2:]),
                   pivot=(hd["pivot"][0] - cx0, hd["pivot"][1] - cy0), mouth=(hd["mouth"][0] - cx0, hd["mouth"][1] - cy0) + tuple(hd["mouth"][2:]),
                   chin=hd["chin"] - cy0, eyes=[(x - cx0, y - cy0, rx, ry) for x, y, rx, ry in hd["eyes"]], hair_from=hd["hair_from"] - cy0)
+        if "lid_color" in hd:
+            hd["lid_color"] = (hd["lid_color"][0] - cx0, hd["lid_color"][1] - cy0)
         c = dict(c, shoulders={k: (v[0] - cx0, v[1] - cy0) for k, v in c["shoulders"].items()})
     j = dict(credit=c["credit"], pad=pad, src_h=b.shape[0], head=hd,
              hand=dict(skin_bgr=list(c["skin_bgr"]), length=c["hand_length"]),
