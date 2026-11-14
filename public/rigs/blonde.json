@@ -1,0 +1,134 @@
+{
+ "src": "drawings/ben/dr/blonde-front.jpg",
+ "credit": "Drawing: Ben (arms and jacket below the page: code stand-ins)",
+ "seeds": "top+sides:1000",
+ "right_edge": [
+  1332.0,
+  0.108
+ ],
+ "bottom": 1868,
+ "pad": 180,
+ "ext": 650,
+ "side_from": [
+  1365,
+  1335
+ ],
+ "shirt_top": 1180,
+ "shirt": [
+  612,
+  935
+ ],
+ "jacket_bgr": [
+  244,
+  244,
+  244
+ ],
+ "shade_bgr": [
+  70,
+  120,
+  200
+ ],
+ "skin_bgr": [
+  228,
+  226,
+  224
+ ],
+ "shoulders": {
+  "left": [
+   110,
+   1420
+  ],
+  "right": [
+   1400,
+   1430
+  ]
+ },
+ "arm": {
+  "upper": 680,
+  "fore": 600,
+  "width": 195
+ },
+ "dark_eyes": true,
+ "hand_length": 430,
+ "head": {
+  "head_ells": [
+   [
+    820,
+    560,
+    520,
+    440
+   ],
+   [
+    800,
+    860,
+    430,
+    330
+   ]
+  ],
+  "neck": [
+   610,
+   910,
+   1000,
+   1290
+  ],
+  "face": [
+   815,
+   690,
+   390,
+   450
+  ],
+  "pivot": [
+   770,
+   1010
+  ],
+  "mouth": [
+   760,
+   935,
+   200,
+   40
+  ],
+  "chin": 990,
+  "eyes": [
+   [
+    570,
+    600,
+    140,
+    125
+   ],
+   [
+    1000,
+    590,
+    145,
+    125
+   ]
+  ],
+  "lid_from": 150,
+  "lash": [
+   20,
+   18,
+   19
+  ],
+  "lash_w": 14,
+  "hair_from": 760,
+  "turn_px": 16
+ },
+ "name": "blonde",
+ "play": {
+  "instrument": "guitar",
+  "strum": [
+   1000,
+   2120
+  ],
+  "angle": -22,
+  "Lb": 980,
+  "strap_shoulder": [
+   1400,
+   1360
+  ],
+  "strap_back": [
+   520,
+   1700
+  ]
+ },
+ "blink": false
+}

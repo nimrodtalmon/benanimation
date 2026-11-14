@@ -74,28 +74,28 @@
    200,
    238
   ],
-  "length": 300
+  "length": 340
  },
  "upper_arm": {
   "file": "upper_arm.png",
   "shoulder": [
-   110.0,
-   100.0
+   130.0,
+   120.0
   ],
   "elbow": [
-   110.0,
-   580.0
+   130.0,
+   600.0
   ]
  },
  "forearm": {
   "file": "forearm.png",
   "elbow": [
-   106.0,
-   85.6
+   125.0,
+   102.0
   ],
   "wrist": [
-   106.0,
-   498.40000000000003
+   125.0,
+   514.8
   ]
  },
  "shoulders": {
@@ -108,5 +108,23 @@
    995
   ]
  },
- "arm_width": 160
+ "arm_width": 200,
+ "play": {
+  "instrument": "bass",
+  "strum": [
+   470,
+   1520
+  ],
+  "angle": -24,
+  "Lb": 520,
+  "strap_shoulder": [
+   630,
+   900
+  ],
+  "strap_back": [
+   200,
+   1150
+  ]
+ },
+ "blink": true
 }

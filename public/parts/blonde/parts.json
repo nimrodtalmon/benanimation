@@ -104,5 +104,23 @@
    1430
   ]
  },
- "arm_width": 195
+ "arm_width": 195,
+ "play": {
+  "instrument": "guitar",
+  "strum": [
+   1000,
+   2120
+  ],
+  "angle": -22,
+  "Lb": 980,
+  "strap_shoulder": [
+   1400,
+   1360
+  ],
+  "strap_back": [
+   520,
+   1700
+  ]
+ },
+ "blink": false
 }

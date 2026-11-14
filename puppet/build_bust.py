@@ -4,9 +4,14 @@ out at the sides), plus code stand-in arms in the drawing's marker style. Same o
 puppet/standins.py (body.png, upper_arm.png, forearm.png, parts.json), so Ben's own drawings of the
 missing parts can replace the stand-ins 1:1.
 
-  python3 puppet/build_bust.py blonde      -> public/parts/blonde/
+  python3 puppet/build_bust.py blonde      -> public/parts/blonde/ (from public/rigs/blonde.json)
 
-Each character is one entry in CHARS (all coordinates in the flattened photo).
+Each character is one settings file, public/rigs/<name>.json (coordinates on the light-flattened
+photo): src (the photo), credit, how to cut it (seeds/right_edge/bottom, or kind "hoodie" with crop,
+head_box and the hoodie outline), the clothes' colors, shoulders, arm and hand sizes, the head
+landmarks for the puppet (head), and how the character plays (play: instrument, strum point,
+neck angle, guitar size, strap ends; in body pixels). Optional: dark_eyes (solid black eye shapes:
+glare removed), shirt/shirt_top (glare on a black shirt), blink (false for drawn eye sockets).
 """
 import json
 import math
@@ -20,49 +25,6 @@ import photo
 from standins import arc, capsule, fill, stroke
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-CHARS = {
-    # Ben's guitarist (blonde, black eye sockets, white jacket over a black DIS-RE shirt)
-    "blonde": dict(
-        src="drawings/ben/dr/blonde-front.jpg",
-        credit="Drawing: Ben (arms and jacket below the page: code stand-ins)",
-        seeds="top+sides:1000",
-        right_edge=(1332.0, 0.108),  # the paper's right edge: x = a + b*y
-        bottom=1868,  # the paper's bottom edge (the table below)
-        pad=180, ext=650,  # canvas padding at the sides; rows added below the page
-        side_from=(1365, 1335),
-        shirt_top=1180,  # the shirt shows from here down (between the lapels): glare removed  # where the jacket meets the left / right page edge (y)
-        shirt=(612, 935),  # x range of the shirt between the lapels at the bottom edge
-        jacket_bgr=(244, 244, 244), shade_bgr=(70, 120, 200), skin_bgr=(228, 226, 224),
-        shoulders=dict(left=(110, 1420), right=(1400, 1430)),
-        arm=dict(upper=680, fore=600, width=195),
-        dark_eyes=True,  # the eye sockets are solid black marker: the flash glare is removed
-        hand_length=430,
-        head=dict(head_ells=[(820, 560, 520, 440), (800, 860, 430, 330)], neck=(610, 910, 1000, 1290),
-                  face=(815, 690, 390, 450), pivot=(770, 1010), mouth=(760, 935, 200, 40), chin=990,
-                  eyes=[(570, 600, 140, 125), (1000, 590, 145, 125)], lid_from=150, lash=(20, 18, 19), lash_w=14,
-                  hair_from=760, turn_px=16),
-    ),
-    # Ben's bassist: the big boy in the middle of the band page (inked head, pencil hoodie)
-    "bassboy": dict(
-        src="drawings/ben/dr/band-sheet.jpg", kind="hoodie",
-        credit="Drawing: Ben (arms and hoodie below the page: code stand-ins)",
-        crop=(380, 420, 1180, 2000),  # x0, y0, x1, y1 on the flattened page
-        head_box=(470, 495, 1110, 1260),  # the inked head: flooded from this box's border
-        hoodie=[(470, 1999), (452, 1650), (458, 1420), (480, 1320), (530, 1250), (575, 1185), (625, 1120), (960, 1120),
-                (1040, 1150), (1085, 1240), (1115, 1330), (1125, 1500), (1118, 1999)],
-        pad=120, ext=500,
-        jacket_bgr=(236, 236, 238), shade_bgr=(150, 150, 160), skin_bgr=(150, 200, 238), line_bgr=(95, 95, 100),
-        shoulders=dict(left=(540, 1415), right=(1060, 1415)),
-        arm=dict(upper=480, fore=430, width=160),
-        hand_length=300,
-        head=dict(head_ells=[(790, 730, 340, 270), (790, 960, 290, 300)], neck=(690, 900, 1180, 1300),
-                  face=(790, 900, 270, 330), pivot=(780, 1150), mouth=(760, 990, 110, 30), chin=1230,
-                  eyes=[(640, 830, 60, 25), (860, 840, 60, 25)], lid_from=150, lid_color=(905, 925), lash=(20, 18, 19), lash_w=10,
-                  hair_from=860, turn_px=14),
-    ),
-}
-
 
 def load_page(c):
     im = cv2.imread(f"{ROOT}/{c['src']}")
@@ -109,20 +71,46 @@ def crayon(img, mask, side_dir, color, width, amount, seed):
     img[..., :3] = img[..., :3] * (1 - k) + col * k
 
 
+def solid_black(f, regions, dark=0.45):
+    """Inside each region (x, y, rx, ry): find the drawn black shape (dark, grey pixels connected to the
+    middle), fill its holes (glare spots) and paint it flat near-black; colored lines on it (red
+    cracks) stay. Only the shape itself changes, not the skin around it."""
+    h, w = f.shape[:2]
+    hsv = cv2.cvtColor((np.clip(f[..., :3], 0, 1) * 255).astype(np.uint8), cv2.COLOR_BGR2HSV).astype(np.float32)
+    v = hsv[..., 2] / 255
+    for (ex, ey, rx, ry) in regions:
+        x0, x1 = int(max(0, ex - 1.7 * rx)), int(min(w, ex + 1.7 * rx))
+        y0, y1 = int(max(0, ey - 1.7 * ry)), int(min(h, ey + 1.7 * ry))
+        dk = ((v[y0:y1, x0:x1] < dark) & (hsv[y0:y1, x0:x1, 1] < 90)).astype(np.uint8)
+        n, lab, st, _ = cv2.connectedComponentsWithStats(dk)
+        cx, cy = int(ex - x0), int(ey - y0)
+        k = lab[cy, cx] if lab[cy, cx] > 0 else (1 + int(np.argmax(st[1:, cv2.CC_STAT_AREA])) if n > 1 else 0)
+        if k == 0:
+            continue
+        m = (lab == k).astype(np.uint8)
+        m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (25, 25)))
+        fill_ = np.pad(m, 1)  # a free border, so everything outside the shape is one region
+        ff = np.zeros((fill_.shape[0] + 2, fill_.shape[1] + 2), np.uint8)
+        cv2.floodFill(fill_, ff, (0, 0), 1)
+        m = m | (1 - fill_[1:-1, 1:-1])  # holes filled
+        m = cv2.GaussianBlur(m.astype(np.float32), (0, 0), 1.0)
+        keep = np.clip((hsv[y0:y1, x0:x1, 1] - 90) / 50, 0, 1)  # saturated lines on top stay
+        k_ = (m * (1 - keep))[..., None]
+        reg = f[y0:y1, x0:x1, :3]
+        rng = np.random.default_rng(int(ex))
+        ink = 0.075 + 0.02 * cv2.GaussianBlur(rng.normal(0, 1, m.shape).astype(np.float32), (0, 0), 3)[..., None]
+        reg[:] = reg * (1 - k_) + ink * k_
+    return f
+
+
 def body(c):
     im, alpha = load_page(c)
     h, w = im.shape[:2]
     pad, ext, bottom = c["pad"], c["ext"], c["bottom"]
     f = np.dstack([im.astype(np.float32) / 255, alpha])
     f = f[:bottom]
-    if c.get("dark_eyes"):
-        Yg, Xg = np.mgrid[0:bottom, 0:w].astype(np.float32)
-        for (ex, ey, rx, ry) in c["head"]["eyes"]:
-            r = np.sqrt(((Xg - ex) / (rx * 1.04)) ** 2 + ((Yg - ey) / (ry * 1.04)) ** 2)
-            inside = np.clip((1 - r) / 0.06, 0, 1)
-            hsv = cv2.cvtColor((f[..., :3] * 255).astype(np.uint8), cv2.COLOR_BGR2HSV).astype(np.float32)
-            k = (inside * np.clip(1 - hsv[..., 1] / 80, 0, 1))[..., None]  # the red cracks stay
-            f[..., :3] = f[..., :3] * (1 - k) + np.minimum(f[..., :3] * 0.18, 0.08) * k
+    if c.get("dark_eyes"):  # solid black marker shapes (eye sockets): the flash glare filled back in, exactly inside the drawn shape
+        f = solid_black(f, [(ex, ey, rx, ry) for (ex, ey, rx, ry) in c["head"]["eyes"]])
     if c.get("shirt_top"):  # the phone flash left a grey glare on the black shirt: subtract it (smooth), letters kept
         s0_, s1_ = c["shirt"]
         y0 = c["shirt_top"]
@@ -292,8 +280,12 @@ def sleeve(c, length, r0, r1, joint0, cuff=False, seed=0):
     return img, A, (cx, y1)
 
 
+def load_rig(name):
+    return json.load(open(f"{ROOT}/public/rigs/{name}.json"))
+
+
 def main(name):
-    c = CHARS[name]
+    c = load_rig(name)
     out = f"{ROOT}/public/parts/{name}"
     os.makedirs(out, exist_ok=True)
     b = body_hoodie(c) if c.get("kind") == "hoodie" else body(c)
@@ -323,7 +315,7 @@ def main(name):
              forearm=dict(file="forearm.png", elbow=[E2[0], E2[1]], wrist=[Wr[0], Wr[1] - 0.04 * ar["fore"]]),
              shoulders=dict(left=[c["shoulders"]["left"][0] + pad, c["shoulders"]["left"][1]],
                             right=[c["shoulders"]["right"][0] + pad, c["shoulders"]["right"][1]]),
-             arm_width=ar["width"])
+             arm_width=ar["width"], play=c.get("play", {}), blink=c.get("blink", True))
     json.dump(j, open(f"{out}/parts.json", "w"), indent=1)
     print(out, b.shape)
 

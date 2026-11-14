@@ -57,9 +57,9 @@ class Drummer:
             tom_mid=(props.drum(112 * s, 100 * s, tilt=0.24, seed=2), P(300, 1065)),
             tom_hi=(props.drum(104 * s, 95 * s, tilt=0.24, seed=1), P(505, 1065)),
             snare=(props.drum(140 * s, 68 * s, chrome=True, tilt=0.34, seed=5), P(610, 1125)),
-            hat=(props.cymbal(128 * s), P(740, 1145)),
-            hat_low=(props.cymbal(128 * s), P(740, 1163)),
-            crash=(props.cymbal(180 * s), P(770, 880)),
+            hat=(props.cymbal(128 * s), P(738, 1055)),  # a hi-hat stands well above the snare
+            hat_low=(props.cymbal(128 * s), P(738, 1073)),
+            crash=(props.cymbal(180 * s), P(815, 850)),
             ride=(props.cymbal(200 * s, tilt=0.26), P(40, 975)),
         )
         self.tilt_deg = dict(tom_mid=9, tom_hi=-9, floor=0, snare=-3, kick=0)
@@ -69,6 +69,7 @@ class Drummer:
         piece_at = {DRUM["SNARE"]: "snare", DRUM["TOM_HI"]: "tom_hi", DRUM["TOM_MID"]: "tom_mid", DRUM["TOM_LO"]: "floor",
                     DRUM["HAT"]: "hat", DRUM["OPEN_HAT"]: "hat", DRUM["CRASH"]: "crash"}
         hand_of = {"snare": "l", "tom_hi": "r", "tom_mid": "l", "floor": "l", "hat": "r", "crash": "r"}
+        no_cross = {"l": {"hat", "crash"}, "r": {"floor"}}
         self.hits = {"l": [], "r": []}
         for d in sorted(self.song.data["drums"], key=lambda d: d["t"]):
             if d["piece"] not in piece_at:
@@ -77,8 +78,8 @@ class Drummer:
             hand = hand_of[what]
             if self.hits[hand] and d["t"] - self.hits[hand][-1][0] < 0.11:
                 other = "l" if hand == "r" else "r"
-                if not self.hits[other] or d["t"] - self.hits[other][-1][0] >= 0.11:
-                    hand = other
+                if what not in no_cross[other] and (not self.hits[other] or d["t"] - self.hits[other][-1][0] >= 0.11):
+                    hand = other  # the free hand helps out (on drums in reach, never across the kit to a far cymbal)
                 else:
                     continue
             self.hits[hand].append((d["t"], what, d["vel"]))
@@ -117,13 +118,20 @@ class Drummer:
     def head_args(self, e):
         return dict(smile=e["smile"], brow=e["brow"])
 
+    # where a stick lands, in units of the drum's / cymbal's own radii (x toward the playing hand's
+    # side, y toward the drummer = up on screen): a drum near the middle of its head; a hi-hat on its
+    # top between bell and edge (on its open side: the snare hides its inner side); a crash on its
+    # edge, drummer's side
+    STRIKE = {"hat": (0.3, -0.4), "crash": (-0.35, -0.8), "ride": (0.3, -0.45), "drum": (0.15, -0.15)}
+
     def strike_point(self, what, side):
         img, anc = self.kit[what][0]
         x, y = self.kit[what][1]
         sg = -1 if side == "l" else 1
-        if what in ("hat", "crash"):
-            return np.array([x + sg * 0.3 * img.shape[1] / 2, y - 2])
-        return np.array([x + sg * 0.15 * img.shape[1] / 2, y + 2])
+        rx = anc.get("rx", img.shape[1] / 2)
+        ry = anc.get("ry", 0.3 * rx)
+        fx, fy = self.STRIKE.get(what, self.STRIKE["drum"])
+        return np.array([x + sg * fx * rx, y + fy * ry])
 
     def hand_pose(self, side, t):
         """Stick tip path from the score: arc up between hits, fast down-stroke onto the next one."""
@@ -189,6 +197,7 @@ class Drummer:
             tip = tip + np.array([0, bounce * 0.5])
             L = self.arms[side]
             L.fore_k = 0.55 + 0.2 * lift  # forearms point at the kit (toward us); lifted they show more
+            L.up_k = 1.0
             S = np.array([x0 + self.shoulders[side][0] * sp, top + self.shoulders[side][1] * sp])
             hd = self.hands[side]
             fore = self.prev_fore.get(side, L.a2_0)
@@ -196,10 +205,22 @@ class Drummer:
                 yaw, s_hand = hd.solve(ang, fore)
                 wrist = tip - hd.tip_offset(yaw, s_hand, self.hand_anchor)
                 wrist = wrist + np.array([0, -45 * s * lift])  # ... raised a little on the backstroke
-                E, Wr = L.solve(S, wrist, sp)
+                E, Wr = L.solve_reach(S, wrist, sp)
                 fore = math.atan2(Wr[1] - E[1], Wr[0] - E[0])
+            # out of reach even with the arm unfolded: angle the stick toward the target (a drummer
+            # reaches with the stick), so the tip still lands on the drum
+            fix = 0.0
+            for _ in range(4):
+                tip_now = Wr + hd.tip_offset(yaw, s_hand, self.hand_anchor)
+                if np.hypot(*(tip_now - (tip - np.array([0, -45 * s * lift])))) < 1.0:
+                    break
+                v_have, v_need = tip_now - Wr, tip - np.array([0, -45 * s * lift]) - Wr
+                d_ang = math.atan2(v_need[1], v_need[0]) - math.atan2(v_have[1], v_have[0])
+                d_ang = (d_ang + math.pi) % (2 * math.pi) - math.pi
+                fix += d_ang
+                yaw, s_hand = hd.solve(ang + fix, fore)
             self.prev_fore[side] = fore
-            yaw, s_hand = hd.solve(ang_now, fore)
+            yaw, s_hand = hd.solve(ang_now + fix, fore)
             loose = lift * 1.4 - 0.15
             poses[side] = (S, E, Wr, yaw, s_hand, loose)
         self._poses = poses

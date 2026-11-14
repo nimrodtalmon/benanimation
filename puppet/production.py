@@ -12,6 +12,7 @@ import sys
 import cv2
 import numpy as np
 
+import props
 import warp
 
 ROOT = warp.ROOT
@@ -253,7 +254,7 @@ class HandDrawn:
 class Production:
     def __init__(self, song, cast, shots, name, crowd_in=(), zoom_wide=(1.04, 1.0), zoom=(1.0, 1.05), script=None, cue=None,
                  look=None, twos=False, crowd_wide=True, drift=0.0, parallax=None, ghost=0.0, stage="stage", punch=None, roll=0.0,
-                 backdrop=None, fore=None, post=None):
+                 backdrop=None, fore=None, post=None, marker=1.0):
         """look: a HandDrawn finish (or None); twos: characters move on twos (15 drawings a second,
         the camera and lights stay smooth), the cadence of hand-drawn 2D."""
         self.song, self.cast_f, self.shots, self.name = song, cast, shots, name
@@ -275,6 +276,7 @@ class Production:
         # the wall's parallax); fore(frame, t, shot) in front of them (haze, flashes); post(img, t)
         # on the finished 8-bit picture, outside the camera (titles)
         self.backdrop, self.fore, self.post = backdrop, fore, post
+        props.set_marker(marker)  # how hand-drawn the code-drawn props look (1 = marker style, 0 = closer to real)
         self.cast = {}
         self.stage = Stage(song, stage)
 

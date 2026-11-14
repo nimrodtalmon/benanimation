@@ -207,7 +207,8 @@ def post(img, t):
 prod = Production(song, CAST, SHOTS, name="distorted", script=os.path.abspath(__file__),
                   look=Looks(HandDrawn(), TVStatic(0.05, vhs=0.25)), stage="stage", crowd_wide=False, cue=cue,
                   drift=lambda a: 0.015 if a < DRUMS_IN else (0.05 if a < 44 else (0.065 if a < 68 else 0.09)),  # camera energy climbs
-                  parallax=0.55, ghost=0.35, backdrop=backdrop, fore=fore, post=post)
+                  parallax=0.55, ghost=0.35, backdrop=backdrop, fore=fore, post=post,
+                  marker=0.25)  # the kit and guitars closer to real (round-5 feedback)
 
 if __name__ == "__main__":
     prod.main(sys.argv)

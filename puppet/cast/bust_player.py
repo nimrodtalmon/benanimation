@@ -1,10 +1,11 @@
-"""A guitar or bass player made from a bust drawing (puppet/build_bust.py -> public/parts/<name>):
+"""A guitar or bass player made from a bust drawing (public/rigs/<name>.json -> puppet/build_bust.py ->
+public/parts/<name>; the instrument's place on the body is the rig's "play" entry):
 the drawing as a head/body puppet, stand-in arms as limbs (2-bone IK to the pick and to the
 neck), rigged hands, a guitar on a strap. Strums (guitar) or plucks (bass) from the score.
 
-  BustPlayer(song, "blonde", instrument="guitar", scale=0.5, cx=W / 2, top=0, head=1.0)
+  BustPlayer(song, "blonde", scale=0.5, cx=W / 2, top=0, head=1.0)
 
-All placements are in body-drawing pixels (BODY dict), so a new character only needs its numbers."""
+Nothing here is specific to a character: all placements come from its parts.json."""
 import json
 import math
 
@@ -23,25 +24,19 @@ from warp import over_sub
 ROOT = warp.ROOT
 W, H = warp.W, warp.H
 
-# where the instrument sits on each body (body-drawing px): the strum point, the angle of the neck,
-# the guitar's body length, the strap's end on the far shoulder
-BODY = {
-    "blonde": dict(strum=(1000, 2120), angle=-22, Lb=980, strap_shoulder=(1400, 1360), strap_back=(520, 1700)),
-    "bassboy": dict(strum=(470, 1520), angle=-24, Lb=520, strap_shoulder=(630, 900), strap_back=(200, 1150)),
-}
 GUITAR = dict(neck=1.55, burst=((0.25, 0.55, 0.85), (0.22, 0.20, 0.10)), n_strings=6)
 BASS = dict(neck=2.0, burst=((0.20, 0.20, 0.75), (0.08, 0.06, 0.10)), n_strings=4)
 
 
 class BustPlayer:
-    def __init__(self, song, name, instrument="guitar", scale=0.5, cx=W / 2, top=0, head=1.0, seed=3, groove=1.0, style="rock",
+    def __init__(self, song, name, instrument=None, scale=0.5, cx=W / 2, top=0, head=1.0, seed=3, groove=1.0, style="rock",
                  face=True, shouts=()):
         """face: expressions from the music (smile in loud parts, brows up on accents, a shout at
         each time in shouts, e.g. where the band comes back in)."""
         """groove: how much the body moves with the music (puppet/groove.py; 0 = still)."""
-        self.song, self.name, self.inst = song, name, instrument
         parts = f"{ROOT}/public/parts/{name}"
         j = json.load(open(f"{parts}/parts.json"))
+        self.song, self.name, self.inst = song, name, instrument or j["play"].get("instrument", "guitar")
         self.j = j
         pad = j["pad"]
         hd = j["head"]
@@ -57,7 +52,7 @@ class BustPlayer:
             cfg["lid_color"] = (sx(hd["lid_color"][0]), hd["lid_color"][1])
         self.p = warp.Puppet(cfg)
         self.s = scale
-        b = BODY[name]
+        b = j["play"]
         self.b = b
         wl = self.p.head.shape[1]
         self.x0, self.top = int(cx - wl / 2), top
@@ -69,11 +64,11 @@ class BustPlayer:
         self.pick_hand = handrig.Hand(st, mirror=False)
         self.fret_hand = handrig.Hand(st, mirror=True)
         self.hsize = hs["length"] * scale
-        kind = GUITAR if instrument == "guitar" else BASS
+        kind = GUITAR if self.inst == "guitar" else BASS
         self.g, self.ga = props.guitar(b["Lb"] * scale, **kind)
         self.g_angle = math.radians(b["angle"])
         # strokes from the score: guitar strums (down/up), bass plucks (alternating fingers)
-        if instrument == "guitar":
+        if self.inst == "guitar":
             ev = [(g["t"], 1 if g["dir"] == "down" else -1, 1.0 if g["accent"] else 0.6) for g in song.data["guitar"]]
             self.chords = [(g["t"], g["chord"]) for g in song.data["guitar"]]
         else:
@@ -92,7 +87,7 @@ class BustPlayer:
         crashes = [d["t"] for d in song.data.get("drums", []) if d["piece"] == 49]
         self.face = Face(song, accents=crashes, hits=list(self.hit_t), base_smile=0.05, seed=seed) if face else None
         self.shouts = np.sort(np.asarray(shouts, float))
-        self.blinks = self.j["head"].get("lid_from") is not None and name != "blonde"  # drawn eye sockets don't blink
+        self.blinks = j.get("blink", True)  # drawn eye sockets don't blink
         self.motion = HeadMotion(seed, acc, song.duration, song.spb, turn_amp=0.4 * head, tilt_amp=3.0 * head, nod_px=8 * scale / 0.5 * head)
 
     def credit(self):

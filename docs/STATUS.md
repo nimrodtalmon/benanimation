@@ -27,6 +27,19 @@ Read this first in a new session, then `docs/TOOLKIT.md` (pipeline + lessons).
 - `puppet/build_bust.py`: a bust drawing -> puppet body (jacket/hoodie continued past the page, glare removed, stand-in arms).
 - `cast/pepper.py` Drummer has a `rig()` hook: any character can sit at the kit (kit units around the shoulders).
 
+## Generic structure (Nov 14, round 5)
+- A character = drawings + one settings file `public/rigs/<name>.json` (cut, colors, shoulders, arm/hand sizes,
+  head landmarks, how it plays: instrument, strum point, neck angle, strap). `build_bust.py <name>` -> `public/parts/<name>/`.
+- `puppet/rig.py` loads any rigged character the same way (puppet config, arms, hand style).
+- Cast classes have no character-specific code: `BustPlayer(song, name)` (guitar/bass from the rig's "play"),
+  `KitPlayer(song, name)` (any character at the drum kit; `DistorDrummer` = `KitPlayer(song, "distor")`).
+- Drums: stick tips land exactly (`tools`-style check: tip vs strike point < 1.5 px): arms unfold when a target is out of
+  reach (`Limb.solve_reach`), the stick angles toward a target the wrist cannot reach, a free hand never crosses the kit
+  to a far cymbal; strike points per piece in the piece's own radii (`Drummer.STRIKE`: crash on its near edge, hi-hat on
+  its open side, drums near the middle); the hi-hat stands above the snare.
+- `Production(marker=...)`: how hand-drawn code props look (1 = marker style, 0 = closer to real); the kit got lathed
+  cymbals with a lit edge and a shaded bell, smoother coated heads, glossier shells.
+
 ## Feedback (Nov 14)
 - band2: TV effect too much (keep as a dial: `TVStatic(amount, vhs)`); drummer hand looked detached -> fixed (hand sits in the cuff).
 - Ben's band: Distor = drummer, blonde = guitarist (sings most in songs with vocals; all of them sing), bassist = left boys of the band page.

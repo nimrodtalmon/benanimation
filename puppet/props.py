@@ -113,6 +113,15 @@ def blit(dst, prop, M):
 
 
 # ---------------------------------------------------------------- drum kit
+# how strongly code-drawn props get the marker look (flat tones, streaks, highlight dashes): 1 = as
+# Ben draws (the old clips), 0 = smooth and closer to real. Set per production with set_marker().
+MARKER = {"amount": 1.0}
+
+
+def set_marker(amount):
+    MARKER["amount"] = float(amount)
+
+
 RED_SHELL = ((0.10, 0.06, 0.32), (0.25, 0.18, 0.68))  # BGR dark, light: deep red sparkle lacquer
 CHROME = ((0.38, 0.38, 0.40), (0.92, 0.92, 0.94))
 HEAD = (0.86, 0.90, 0.92)
@@ -133,7 +142,7 @@ def _sparkle_shell(h, w, dark, light, seed=0, chrome=False):
     base = np.clip(1 - np.abs(x + 0.15) ** 1.6, 0, 1)
     col = np.asarray(dark, np.float32) * (1 - base[:, None]) + np.asarray(light, np.float32) * base[:, None]
     img = np.broadcast_to(col[None], (h, w, 3)).copy()
-    spec = np.exp(-((x + 0.45) / 0.07) ** 2) * 0.55 + np.exp(-((x - 0.55) / 0.05) ** 2) * 0.25
+    spec = np.exp(-((x + 0.45) / 0.07) ** 2) * 0.55 + np.exp(-((x - 0.55) / 0.05) ** 2) * 0.25 + np.exp(-((x + 0.4) / 0.25) ** 2) * 0.12
     if chrome:  # chrome reflects the room: dark and light bands
         bands = 0.35 * np.sin(x * 9.0 + 1.0) + 0.25 * np.sin(x * 23.0)
         img = img * (1 + bands[None, :, None] * 0.6)
@@ -159,6 +168,10 @@ def _head_tone(h, w, cx, cy, rx, ry, seed=0):
     wear = np.exp(-((rr - 0.12) / 0.22) ** 2) * 0.07
     img -= wear[..., None] * np.array([1.0, 1.0, 0.9], np.float32)
     img *= (1 - 0.10 * np.clip(rr - 0.75, 0, 1) / 0.25)[..., None]
+    # the collar: a soft grey ring where the head bends over the shell's edge, and a light sheen
+    img *= (1 - 0.12 * np.exp(-((rr - 0.9) / 0.06) ** 2))[..., None]
+    sheen = np.exp(-(((xx - cx) / rx + 0.35) ** 2 / 0.05 + ((yy - cy) / ry + 0.45) ** 2 / 0.08)) * 0.08
+    img += sheen[..., None]
     return np.clip(img, 0, 1)
 
 
@@ -200,7 +213,7 @@ def drum(rx, depth, shell=RED_SHELL, ink=4, lugs=6, tilt=0.30, chrome=False, see
     _line(img, _ellipse_pts(cx, cy - hoop * 0.25, rx - hoop * 0.3, ry - hoop * 0.2, math.pi * 1.15, math.pi * 1.6, 30), hoop * 0.3, color=(1, 1, 1))
     _line(img, body, ink, closed=False)
     img = marker(img, math.pi / 2, seed=seed)
-    return img, dict(head=(cx, cy), top=(cx, cy))
+    return img, dict(head=(cx, cy), top=(cx, cy), rx=rx, ry=ry)
 
 
 def kick_front(r, skull=None, ink=5):
@@ -261,18 +274,25 @@ def cymbal(rx, tilt=0.22, ink=3):
     rr = np.sqrt(((xx - cx) / rx) ** 2 + ((yy - cy) / ry) ** 2)
     ang = np.arctan2((yy - cy) / ry, (xx - cx) / rx)
     grooves = 0.5 + 0.5 * np.sin(rr * 140)
+    bands = 0.5 + 0.5 * np.sin(rr * 22 + 1.3)  # wider tonal rings from the lathe
     aniso = 0.5 + 0.5 * np.cos(2 * (ang + 0.6))  # anisotropic sheen of a lathed surface
-    tone = 0.45 + 0.35 * aniso + 0.08 * grooves - 0.15 * rr
+    streak = np.exp(-(((xx - cx) / rx * math.sin(0.5) - (yy - cy) / ry * math.cos(0.5)) / 0.11) ** 2)  # the light's reflection across
+    tone = 0.40 + 0.30 * aniso + 0.07 * grooves + 0.10 * bands - 0.22 * rr ** 1.5 + 0.35 * streak * (0.4 + 0.6 * rr)
     col = np.asarray(BRASS[0], np.float32) * (1 - tone[..., None]) + np.asarray(BRASS[1], np.float32) * tone[..., None]
+    col = col + (0.25 * streak * np.clip(rr - 0.2, 0, 1))[..., None]  # whiter at the streak's outer parts
     _poly(img, out, np.clip(col, 0, 1), ink=0)
-    _poly(img, _ellipse_pts(cx, cy - ry * 0.28, rx * 0.17, ry * 0.45), _gradient(h, w, BRASS[1], BRASS[0]), ink=1.5)  # bell
+    bx_, by_, brx, bry = cx, cy - ry * 0.28, rx * 0.17, ry * 0.45  # the bell: a dome, lit from the upper left
+    bu = np.clip(1 - (((xx - bx_ + 0.35 * brx) / brx) ** 2 + ((yy - by_ + 0.4 * bry) / bry) ** 2), 0, 1)
+    bell = np.asarray(BRASS[0], np.float32) * (1 - bu[..., None]) * 0.9 + np.asarray(BRASS[1], np.float32) * (0.25 + 0.85 * bu[..., None])
+    _poly(img, _ellipse_pts(bx_, by_, brx, bry), np.clip(bell, 0, 1), ink=1.5 * (0.5 + 0.5 * MARKER["amount"]))
     _poly(img, [(cx - rx * 0.05, cy - ry * 0.75), (cx + rx * 0.05, cy - ry * 0.75), (cx + rx * 0.05, cy - ry * 0.55), (cx - rx * 0.05, cy - ry * 0.55)],
           (0.25, 0.25, 0.55), ink=1.5)  # felt
     _poly(img, _ellipse_pts(cx, cy - ry * 0.9, rx * 0.06, rx * 0.035, n=20), CHROME[1], ink=1.5)  # wing nut
-    _line(img, _ellipse_pts(cx, cy, rx, ry, 0.1, math.pi - 0.1, 60), 2.0, color=BRASS[0])  # edge
-    _line(img, out, ink, closed=True)
+    _line(img, _ellipse_pts(cx, cy, rx, ry, 0.1, math.pi - 0.1, 60), max(2.0, rx * 0.025), color=BRASS[0])  # edge thickness, near side
+    _line(img, _ellipse_pts(cx, cy - rx * 0.012, rx, ry, 0.15, math.pi - 0.15, 60), max(1.0, rx * 0.008), color=(0.75, 0.92, 1.0))  # its lit lip
+    _line(img, out, ink * (0.6 + 0.4 * MARKER["amount"]), closed=True)
     img = marker(img, 0.12, seed=int(rx))
-    return img, dict(center=(cx, cy))
+    return img, dict(center=(cx, cy), rx=rx, ry=ry)
 
 
 def stand(dst, top, floor_y, width=6, legs=True, tilter=True):
@@ -500,7 +520,7 @@ def _streaks(h, w, angle, seed, length=40, width=1.6):
     return s / (s.std() + 1e-6)
 
 
-def marker(img, angle=0.0, seed=0, tones=6, streak=0.07, ink_boost=1.6, hl=True):
+def marker(img, angle=0.0, seed=0, tones=6, streak=0.07, ink_boost=1.6, hl=True, amount=None):
     """Re-render a code-drawn BGRA sprite in a marker style: shading quantized to a few flat tones
     with soft steps, marker streaks along `angle`, the dark outline thickened and wobbly, and a few
     white highlight strokes on the light tones (as Ben does on hair and buttons)."""
@@ -537,7 +557,8 @@ def marker(img, angle=0.0, seed=0, tones=6, streak=0.07, ink_boost=1.6, hl=True)
                 cv2.line(hm, (int(x0), int(y0)), (int(x0 + L * math.cos(angle)), int(y0 + L * math.sin(angle))), 1.0, max(1, int(rng.uniform(1.5, 3))), cv2.LINE_AA)
             hm *= bright
             col = col * (1 - 0.8 * hm[..., None]) + 0.97 * 0.8 * hm[..., None]
-    out[..., :3] = np.clip(col, 0, 1)
+    k = MARKER["amount"] if amount is None else amount
+    out[..., :3] = np.clip(col * k + bgr * (1 - k), 0, 1)
     out[..., 3] = np.maximum(a, cv2.dilate(a, np.ones((3, 3), np.uint8)) * 0.0)
     return out
 

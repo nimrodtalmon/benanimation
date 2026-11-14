@@ -112,6 +112,18 @@ class Limb:
         """IK for this arm (it bends toward its inner side): shoulder, wrist target -> elbow, wrist."""
         return ik(S, T, self.L1 * scale * self.up_k, self.L2 * scale * self.fore_k, -self.inner)
 
+    def solve_reach(self, S, T, scale, slack=0.97):
+        """Like solve, but if the target is out of reach with the current foreshortening, the
+        forearm (then the upper arm) is drawn less foreshortened, up to full length, so the hand
+        gets there (a foreshortened arm that cannot reach would leave a stick or pick in the air).
+        Changes fore_k / up_k for this frame; render with the same Limb."""
+        d = float(np.hypot(*(np.asarray(T, float) - S))) / max(scale, 1e-9)
+        if d > slack * (self.L1 * self.up_k + self.L2 * self.fore_k):
+            self.fore_k = min(1.0, max(self.fore_k, (d / slack - self.L1 * self.up_k) / self.L2))
+            if d > slack * (self.L1 * self.up_k + self.L2 * self.fore_k):
+                self.up_k = min(1.0, max(self.up_k, (d / slack - self.L2 * self.fore_k) / self.L1))
+        return self.solve(S, T, scale)
+
     def _poses(self, S, E, Wr, scale):
         a1 = math.atan2(*(np.asarray(E, float) - S)[::-1])
         a2 = math.atan2(*(np.asarray(Wr, float) - E)[::-1])
