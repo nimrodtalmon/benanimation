@@ -252,7 +252,8 @@ class HandDrawn:
 
 class Production:
     def __init__(self, song, cast, shots, name, crowd_in=(), zoom_wide=(1.04, 1.0), zoom=(1.0, 1.05), script=None, cue=None,
-                 look=None, twos=False, crowd_wide=True, drift=0.0, parallax=None, ghost=0.0, stage="stage", punch=None, roll=0.0):
+                 look=None, twos=False, crowd_wide=True, drift=0.0, parallax=None, ghost=0.0, stage="stage", punch=None, roll=0.0,
+                 backdrop=None, fore=None, post=None):
         """look: a HandDrawn finish (or None); twos: characters move on twos (15 drawings a second,
         the camera and lights stay smooth), the cadence of hand-drawn 2D."""
         self.song, self.cast_f, self.shots, self.name = song, cast, shots, name
@@ -270,6 +271,10 @@ class Production:
         # punch = (times, amount): a quick zoom-in kick on accents (e.g. crash hits), easing back;
         # roll = degrees of slow camera roll (a hand-held / swaying camera)
         self.punch, self.roll = punch, roll
+        # hooks for scenery: backdrop(frame, t, shot) draws on the stage behind the players (it gets
+        # the wall's parallax); fore(frame, t, shot) in front of them (haze, flashes); post(img, t)
+        # on the finished 8-bit picture, outside the camera (titles)
+        self.backdrop, self.fore, self.post = backdrop, fore, post
         self.cast = {}
         self.stage = Stage(song, stage)
 
@@ -292,6 +297,8 @@ class Production:
         a, b, shot, opts = self.shot_at(t)
         wide = isinstance(shot, (tuple, list))
         frame = self.stage.frame(t, wide, self.cue(t, shot) if self.cue else None)
+        if self.backdrop:
+            self.backdrop(frame, t, shot)
         k = (t - a) / (b - a)
         zoom = opts.get("zoom", self.zoom_wide if wide else self.zoom)
         focus = opts.get("focus", (W / 2, H * 0.42))
@@ -322,6 +329,8 @@ class Production:
             w.draw(frame, tc)
         if (wide and self.crowd_wide) or shot in self.crowd_in:
             crowd(frame, t, self.song.spb)
+        if self.fore:
+            self.fore(frame, t, shot)
         if self.stage.dark:
             frame = stage_light(frame, t)
         if self.ghost > 0:
@@ -329,7 +338,8 @@ class Production:
         if self.look is not None:
             frame = self.look(frame, f)
         credit = list(dict.fromkeys([w.j["credit"] for w in who])) + [self.song.credit]
-        return finish(frame, t, 0, 1, rng, credit, zoom=(z, z), focus=focus, vignette=0.45 if self.stage.dark else 0.12, roll=roll)
+        img = finish(frame, t, 0, 1, rng, credit, zoom=(z, z), focus=focus, vignette=0.45 if self.stage.dark else 0.12, roll=roll)
+        return self.post(img, t) if self.post else img
 
     def parallax_bg(self, frame, z, fc):
         """Pre-warp the stage so that, after the camera (zoom z about focus fc), the back wall moves

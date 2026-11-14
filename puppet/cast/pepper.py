@@ -31,14 +31,17 @@ class Drummer:
     PARTS = f"{ROOT}/public/parts/pepper"
     upper_front = False
 
-    def __init__(self, song=None, scale=0.6, cx=W / 2, top=20, empty=False, head=1.0, face=False):
-        """empty=True: only the kit (before she sits down)."""
+    def __init__(self, song=None, scale=0.6, cx=W / 2, top=20, empty=False, head=1.0, face=False, groove=0.0):
+        """empty=True: only the kit (before she sits down). groove: body sway and head-banging with
+        the music (puppet/groove.py; 0 = as before)."""
         self.song = song or Song.default()
         self.empty = empty
         s = scale
         self.s = s  # kit scale: screen px per kit unit (kit units = Pepper's crop pixels)
         self.top = top
         self.rig(scale, cx, top)
+        from groove import Groove
+        self.groove = Groove(self.song, seed=11, amount=groove, sway=0.0, lean=0.0, step=7.0, bounce=3.0, nod=12.0) if groove else None
         # the kit is laid out in kit units around Pepper's shoulders (403, 650); rig() says where
         # that point is on screen for this player
         ax, ay = self.kit_anchor
@@ -166,6 +169,8 @@ class Drummer:
         # head: nods on the snare, glances a little toward the busy hand
         turn, tilt, nod, blink, sway = self.motion.at(t)
         sway = sway * 35 * p.s
+        gv = self.groove.at(t) if self.groove else dict(dx=0.0, dy=0.0, nod=0.0)
+        nod = nod + gv["nod"] * s / 0.6
         e = self.face.at(t) if self.face else dict(smile=0.0, brow=0.0, mouth=0.0, squint=0.0)
         fig = p.head_frame(turn, e["mouth"], "oh", max(blink, e["squint"]), sway, **self.head_args(e))
         th = math.radians(tilt) * p.w_bend
@@ -174,7 +179,8 @@ class Drummer:
         c, sn = np.cos(th), np.sin(th)
         fig = cv2.remap(fig, (px + c * ox + sn * oy).astype(np.float32), (py - sn * ox + c * oy - nod * p.w_bend).astype(np.float32),
                         cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-        top = self.top_body + bounce
+        top = self.top_body + bounce + gv["dy"] * s / 0.6
+        x0 = self.x0 + gv["dx"] * s / 0.6  # the body sways on the stool; the kit stays
         sp = self.sp
         # hands: stick tips from the score; the wrist is found from the tip (hand + stick geometry), then IK
         poses = {}
@@ -183,7 +189,7 @@ class Drummer:
             tip = tip + np.array([0, bounce * 0.5])
             L = self.arms[side]
             L.fore_k = 0.55 + 0.2 * lift  # forearms point at the kit (toward us); lifted they show more
-            S = np.array([self.x0 + self.shoulders[side][0] * sp, top + self.shoulders[side][1] * sp])
+            S = np.array([x0 + self.shoulders[side][0] * sp, top + self.shoulders[side][1] * sp])
             hd = self.hands[side]
             fore = self.prev_fore.get(side, L.a2_0)
             for _ in range(4):  # wrist for the stick-down pose ...
@@ -215,7 +221,7 @@ class Drummer:
         if not self.upper_front:
             uppers()
         if not self.empty:
-            warp.over(frame, fig, self.x0, int(top))
+            warp.over(frame, fig, int(round(x0)), int(top))
         if self.upper_front:  # sleeves drawn over the body (a drawing whose jacket hides the shoulder joints)
             uppers()
         if self.ao is None:  # the kit shades what is right behind it

@@ -15,6 +15,7 @@ import hand as handrig
 import props
 import warp
 from cast.distor import arms
+from groove import Groove
 from motion import HeadMotion, Spring, decay_since
 from props import blit, place
 from warp import over_sub
@@ -33,7 +34,8 @@ BASS = dict(neck=2.0, burst=((0.20, 0.20, 0.75), (0.08, 0.06, 0.10)), n_strings=
 
 
 class BustPlayer:
-    def __init__(self, song, name, instrument="guitar", scale=0.5, cx=W / 2, top=0, head=1.0, seed=3):
+    def __init__(self, song, name, instrument="guitar", scale=0.5, cx=W / 2, top=0, head=1.0, seed=3, groove=1.0):
+        """groove: how much the body moves with the music (puppet/groove.py; 0 = still)."""
         self.song, self.name, self.inst = song, name, instrument
         parts = f"{ROOT}/public/parts/{name}"
         j = json.load(open(f"{parts}/parts.json"))
@@ -81,6 +83,7 @@ class BustPlayer:
         self.hit_t = np.array([e[0] for e in ev])
         self.fret = Spring(0.0, omega=14.0, zeta=0.8)
         acc = [(t, 0.9) for t, _, a in ev if a > 0.9 and (t % song.bar) < 0.08]
+        self.groove = Groove(song, seed=seed, amount=groove) if groove else None
         self.motion = HeadMotion(seed, acc, song.duration, song.spb, turn_amp=0.4 * head, tilt_amp=3.0 * head, nod_px=8 * scale / 0.5 * head)
 
     def credit(self):
@@ -113,6 +116,9 @@ class BustPlayer:
         turn, tilt, nod, blink, sway = self.motion.at(t)
         sway = sway * 35 * p.s
         fig = p.head_frame(turn, 0.0, "ah", 0.0, sway)  # no blink: the eyes are drawn sockets
+        gv = self.groove.at(t) if self.groove else dict(rot=0.0, dx=0.0, dy=0.0, nod=0.0)
+        u = s / 0.5  # groove units are px at scale 0.5
+        nod = nod + gv["nod"] * u
         thh = math.radians(tilt) * p.w_bend
         hx, hy = p.pivot
         ox, oy = p.X - hx, p.Y - hy
@@ -120,24 +126,32 @@ class BustPlayer:
         fig = cv2.remap(fig, (hx + c * ox + sn * oy).astype(np.float32), (hy - sn * ox + c * oy - nod * p.w_bend).astype(np.float32),
                         cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
         pump = decay_since(t, self.hit_t, 0.25)[0]
-        bob = 4 * s * math.sin(t * 1.7) + 0.4 * nod + 3 * s * pump
+        bob = 3 * s * math.sin(t * 1.7) + 0.4 * nod + 3 * s * pump + gv["dy"] * u
         top = self.top + bob
-        org = np.array([self.x0, top])
+        x0 = self.x0 + gv["dx"] * u
         pad = self.j["pad"]
-        W_ = lambda q: org + (np.asarray(q, float) + np.array([pad, 0])) * s  # noqa: E731  body px -> screen
-        Wp = lambda q: org + np.asarray(q, float) * s  # noqa: E731  padded body px (shoulders) -> screen
         b = self.b
+        # the whole body rocks about the hips; everything attached (guitar, strap, arms) follows
+        piv_l = (np.array(b["strum"], float) + [pad, 380]) * s  # hips, in the figure's own pixels
+        rot = gv["rot"]
+        Ml = cv2.getRotationMatrix2D((float(piv_l[0]), float(piv_l[1])), rot, 1.0)
+        fig = cv2.warpAffine(fig, Ml, (fig.shape[1], fig.shape[0]), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+        org = np.array([x0, top])
+        Tb = lambda q: Ml[:, :2] @ (np.asarray(q, float) - org) + Ml[:, 2] + org  # noqa: E731  screen point -> rocked
+        W_ = lambda q: Tb(org + (np.asarray(q, float) + np.array([pad, 0])) * s)  # noqa: E731  body px -> screen
+        Wp = lambda q: Tb(org + np.asarray(q, float) * s)  # noqa: E731  padded body px (shoulders) -> screen
+        g_angle = self.g_angle - math.radians(rot)
         ring, _ = decay_since(t, self.hit_t, 0.35)
         gimg = props.strings(self.g, self.ga, ring, t)
         strum_at = W_(b["strum"])
-        M = place(gimg, self.ga["strum"], strum_at, self.g_angle, 1.0)
+        M = place(gimg, self.ga["strum"], strum_at, g_angle, 1.0)
         Lb = (self.ga["neck"][0] - self.ga["bridge"][0]) / 0.67
         gx, gy = self.ga["neck"][0] - Lb, self.ga["neck"][1]
         butt = M @ np.array([gx + 0.01 * Lb, gy, 1])
         horn = M @ np.array([gx + 0.86 * Lb, gy - 0.33 * Lb, 1])
         sw = 34 * s
         props.strap(frame, [butt, butt + np.array([10, -60]) * s, W_(b["strap_back"])], sw)
-        warp.over(frame, fig, self.x0, int(top))
+        warp.over(frame, fig, int(round(x0)), int(round(top)))
         shoulder = W_(b["strap_shoulder"])
         props.strap(frame, [horn, horn * 0.4 + shoulder * 0.6 + np.array([-30, 10]) * s, shoulder], sw)
         # the guitar's shadow on the jacket
@@ -151,7 +165,7 @@ class BustPlayer:
         # fretting arm (viewer's right): IK from the shoulder to the hand on the neck
         nk0 = M @ np.array([self.ga["neck"][0], self.ga["neck"][1], 1])
         nk1 = M @ np.array([self.ga["nut"][0], self.ga["nut"][1], 1])
-        Rf = handrig.orient(math.degrees(self.g_angle) + 180, 25, 30)
+        Rf = handrig.orient(math.degrees(g_angle) + 180, 25, 30)
         press = decay_since(t, self.hit_t, 0.12)[0]
         cc = (60 + 10 * press, 90 + 8 * press, 45 + 8 * press)
         fp = handrig.POSES["fret"]
@@ -179,7 +193,7 @@ class BustPlayer:
         # picking arm (viewer's left): the pick (or the fingers, on bass) swings across the strings
         sp = self.stroke_pos(t)
         tip = M @ np.array([self.ga["strum"][0] - 0.06 * self.ga["neck_len"] / 1.55, self.ga["strum"][1] + 0.05 * self.ga["neck_len"] * sp / 1.55, 1])
-        Rs = handrig.orient(-25 + 8 * sp + math.degrees(self.g_angle) + 18, -15, 0)
+        Rs = handrig.orient(-25 + 8 * sp + math.degrees(g_angle) + 18, -15, 0)
         pick = np.array([0.20, 0.52, -0.10])
         held = [dict(p0=pick, p1=pick + [0.05, 0.05, 0], r0=0.045, r1=0.02, color=(0.25, 0.25, 0.85), gloss=0.5)] if self.inst == "guitar" else []
         wrist = tip - ((Rs @ pick)[:2] - (Rs @ np.zeros(3))[:2]) * self.hsize

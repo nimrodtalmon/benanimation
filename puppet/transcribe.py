@@ -158,6 +158,26 @@ def sections(y, bar, duration, t0=0.0):
     return out
 
 
+def holes(y, min_len=0.3, level=0.15):
+    """Moments where the whole band stops (stop-time breaks): the mix level under `level` of its
+    loud level for at least min_len seconds -> [[t0, t1]]."""
+    e = env(y)
+    e = np.convolve(e, np.ones(4) / 4, mode="same")
+    q = e < level * np.percentile(e, 90)
+    out, i = [], 0
+    while i < len(q):
+        if q[i]:
+            j = i
+            while j < len(q) and q[j]:
+                j += 1
+            if (j - i) * HOP / SR >= min_len:
+                out.append([round(i * HOP / SR, 3), round(j * HOP / SR, 3)])
+            i = j
+        else:
+            i += 1
+    return out
+
+
 def transcribe(mix, stems, credit=""):
     y = load(mix)
     duration = len(y) / SR
@@ -177,7 +197,7 @@ def transcribe(mix, stems, credit=""):
         down = ph < 0.25 or ph > 0.75
         root = librosa.note_to_midi(n.rstrip("m5") + "2")
         guitar.append(dict(t=round(g["t"], 3), dur=g["dur"], root=int(root), chord=n, dir="down" if down else "up", accent=g["vel"] > 100))
-    return dict(bpm=round(bpm, 2), duration=round(duration, 3), beats=[round(float(b), 3) for b in bt],
+    return dict(bpm=round(bpm, 2), duration=round(duration, 3), beats=[round(float(b), 3) for b in bt], holes=holes(y),
                 sections=sections(y, 4 * spb, duration, float(bt[0]) if len(bt) else 0.0), credit=credit,
                 drums=[dict(beat=None, piece=d["piece"], vel=d["vel"], t=round(d["t"], 3)) for d in dr],
                 bass=[dict(t=round(b["t"], 3), dur=b["dur"], pitch=b["pitch"], vel=b["vel"]) for b in bass],
