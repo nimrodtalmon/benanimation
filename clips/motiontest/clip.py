@@ -8,6 +8,8 @@ The same moment in several options, to choose how characters should move and loo
   B  fluid motion: weight shift, overlapping arms, hand drag, lean and settle
   C  B + hand-drawn finish (line boil, paper grain, color grade)
   D  C with the characters on twos (15 drawings a second, smooth camera)
+  E  B + subtle finish (the default HandDrawn: a faint boil)
+  pair                                          -> out/motiontest-BE.mp4 (B and E side by side)
 """
 import os
 import subprocess
@@ -28,8 +30,9 @@ OPTS = {
     "B": dict(fluid=True, look=None, twos=False),
     "C": dict(fluid=True, look="hd", twos=False),
     "D": dict(fluid=True, look="hd", twos=True),
+    "E": dict(fluid=True, look="subtle", twos=False),
 }
-LABEL = {"A": "A  now", "B": "B  fluid motion", "C": "C  fluid + hand-drawn finish", "D": "D  C on twos"}
+LABEL = {"A": "A  now", "B": "B  fluid motion", "C": "C  fluid + hand-drawn finish", "D": "D  C on twos", "E": "E  fluid + subtle finish"}
 
 
 def cue(t, shot):
@@ -44,7 +47,7 @@ def production(opt):
     o = OPTS[opt]
     cast = {"full": lambda: Singer(song, scale=0.25, top=50, walk=walk, fluid=o["fluid"])}
     shots = [(0, song.duration, "full", dict(zoom=(1.12, 1.16), focus=follow))]
-    look = HandDrawn() if o["look"] else None
+    look = {None: None, "hd": HandDrawn(boil=1.3, hold=3), "subtle": HandDrawn()}[o["look"]]
     return Production(song, cast, shots, name=f"motiontest-{opt}", script=os.path.abspath(__file__), cue=cue, look=look, twos=o["twos"])
 
 
@@ -59,10 +62,20 @@ def grid():
     subprocess.run(cmd, check=True)
 
 
+def pair(a="B", b="E"):
+    outs = [f"{ROOT}/out/motiontest-{k}.mp4" for k in (a, b)]
+    flt = ";".join(f"[{i}:v]scale=960:540,drawtext=text='{LABEL[k]}':x=20:y=20:fontsize=30:fontcolor=white:box=1:boxcolor=black@0.5[v{i}]" for i, k in enumerate((a, b)))
+    flt += ";[v0][v1]hstack[out]"
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", outs[0], "-i", outs[1], "-filter_complex", flt, "-map", "[out]", "-map", "0:a",
+                    "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", f"{ROOT}/out/motiontest-{a}{b}.mp4"], check=True)
+
+
 if __name__ == "__main__":
     what = sys.argv[1]
     if what == "grid":
         grid()
+    elif what == "pair":
+        pair(*sys.argv[2:4])
     elif what == "stills":
         production(sys.argv[2]).stills([float(a) for a in sys.argv[3:]], f"{ROOT}/out/motiontest-{sys.argv[2]}-still")
     else:

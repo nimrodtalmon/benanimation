@@ -145,7 +145,7 @@ class HandDrawn:
     (lifted teal shadows, warm highlights, a gentle S-curve). Background areas are smooth, so the
     boil only shows on lines and texture."""
 
-    def __init__(self, boil=1.3, hold=3, paper=0.07, grade=0.6, seed=0):
+    def __init__(self, boil=0.4, hold=4, paper=0.07, grade=0.6, seed=0):  # boil 1.3 read as too wobbly
         self.boil, self.hold, self.paper, self.grade = boil, hold, paper, grade
         rng = np.random.default_rng(seed)
         g = rng.normal(0, 1, (H, W)).astype(np.float32)
