@@ -539,3 +539,16 @@ def marker(img, angle=0.0, seed=0, tones=6, streak=0.07, ink_boost=1.6, hl=True)
     out[..., :3] = np.clip(col, 0, 1)
     out[..., 3] = np.maximum(a, cv2.dilate(a, np.ones((3, 3), np.uint8)) * 0.0)
     return out
+
+
+def mic_stand(dst, x, top, floor, s):
+    """A straight mic stand: round heavy base on the floor, tube with a clutch, a clip at the top."""
+    w = max(4, int(16 * s))
+    pole(dst, (x, top + 20 * s), (x, floor - 20 * s), w)
+    cy = top + (floor - top) * 0.45
+    cv2.rectangle(dst, (int(x - w * 1.3), int(cy - w * 1.4)), (int(x + w * 1.3), int(cy + w * 1.4)), INK, -1, cv2.LINE_AA)
+    cv2.rectangle(dst, (int(x - w), int(cy - w)), (int(x + w), int(cy + w)), (0.55, 0.55, 0.58), -1, cv2.LINE_AA)
+    cv2.ellipse(dst, (int(x), int(floor - 8 * s)), (int(150 * s), int(30 * s)), 0, 0, 360, INK, -1, cv2.LINE_AA)
+    cv2.ellipse(dst, (int(x), int(floor - 14 * s)), (int(140 * s), int(22 * s)), 0, 0, 360, (0.22, 0.22, 0.24), -1, cv2.LINE_AA)
+    cv2.ellipse(dst, (int(x - 40 * s), int(floor - 20 * s)), (int(60 * s), int(6 * s)), 0, 0, 360, (0.45, 0.45, 0.48), -1, cv2.LINE_AA)
+    cv2.rectangle(dst, (int(x - w * 1.1), int(top)), (int(x + w * 1.1), int(top + 40 * s)), INK, -1, cv2.LINE_AA)  # clip

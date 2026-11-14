@@ -183,16 +183,20 @@ def denim(h, w, seed=0):
     return np.clip(base[None, None] * k[..., None], 0, 1)
 
 
-def legs(big, X, Y0):
-    """Jeans, belt and shoes, drawn into big (BGRA) with page-to-canvas offsets X() and Y0."""
+def legs(big, X, Y0, which="all"):
+    """Jeans, belt and shoes, drawn into big (BGRA) with page-to-canvas offsets X() and Y0.
+    which: "all", "hips" (hip block + belt only), or -1 / +1 (one leg with its shoe)."""
     H, Wb = big.shape[:2]
     cx = X(575)
     Y = lambda y: y + Y0  # noqa: E731
     jeans = np.zeros_like(big)
     dn = denim(H, Wb, 5)
     hip = [(cx - 400, Y(BELT)), (cx + 400, Y(BELT)), (cx + 405, Y(CROTCH)), (cx - 405, Y(CROTCH))]
-    fill(jeans, np.array(hip, float), dn, 31)
-    for sg in (-1, 1):
+    if which in ("all", "hips"):
+        fill(jeans, np.array(hip, float), dn, 31)
+        stroke(jeans, [(cx - 405, Y(CROTCH - 30)), (cx - 400, Y(BELT + 60))], 12, seed=30)
+        stroke(jeans, [(cx + 405, Y(CROTCH - 30)), (cx + 400, Y(BELT + 60))], 12, seed=29)
+    for sg in ((-1, 1) if which == "all" else (which,) if which in (-1, 1) else ()):
         leg = [(cx + sg * 405, Y(BELT + 100)), (cx + sg * 395, Y(CROTCH)), (cx + sg * 362, Y(3080)), (cx + sg * 345, Y(ANKLE)),
                (cx + sg * 120, Y(ANKLE)), (cx + sg * 112, Y(3080)), (cx + sg * 30, Y(CROTCH + 70)), (cx, Y(CROTCH))]
         fill(jeans, np.array(leg, float), dn, 32 + sg)
@@ -220,6 +224,8 @@ def legs(big, X, Y0):
             yk = ANKLE + 20 + 35 * k
             stroke(jeans, [(ax - 50 + sg * 10, Y(yk)), (ax + 50 + sg * 10, Y(yk + 12))], 7, seed=88 + k, color=(230, 230, 230))
         stroke(jeans, [(ax - 135, Y(ANKLE - 10)), (ax + 135, Y(ANKLE - 10))], 12, seed=90 + sg)  # hem over the shoe
+    if which not in ("all", "hips"):
+        return jeans
     # belt with a buckle, visible between the jacket panels
     belt = [(cx - 405, Y(BELT - 10)), (cx + 405, Y(BELT - 10)), (cx + 405, Y(BELT + 55)), (cx - 405, Y(BELT + 55))]
     fill(jeans, np.array(belt, float), np.full((H, Wb, 3), 0.07, np.float32) + np.array([0.0, 0.04, 0.10], np.float32), 92)
@@ -234,7 +240,7 @@ def legs(big, X, Y0):
 SHEEN_DENIM = (205, 150, 95)
 
 
-def body():
+def body(with_legs=True):
     """Pad the drawing; continue the shoulders and jacket past the page edge down to its hem; the
     shirt down to the belt; then jeans and shoes (code stand-ins in a marker style)."""
     im = cv2.imread(SRC, cv2.IMREAD_UNCHANGED).astype(np.float32) / 255
@@ -276,7 +282,7 @@ def body():
         edge = np.median(im[1350:1590, xs_, :3].reshape(-1, 3), axis=0) * 255
         fill(ext, np.array(poly, float), tex("jacket", H, Wb, edge, seed), seed)
         stroke(ext, np.array(poly[:6], float), 12, seed=seed + 10)
-    jeans = legs(big, X, 0)
+    jeans = legs(big, X, 0, "all" if with_legs else "hips")
     a = big[..., 3:4]
     out = jeans.copy()
     for layer in (ext, big):  # jeans, then the jacket sides, then the continued drawing
@@ -327,10 +333,23 @@ def main():
     save(f"{OUT}/upper_arm.png", ua)
     save(f"{OUT}/forearm.png", fa)
     save(f"{OUT}/body.png", body())
+    save(f"{OUT}/body_nolegs.png", body(with_legs=False))
+    leg_j = {}
+    for side, sg in (("l", -1), ("r", 1)):  # one image per leg, joints in its own crop
+        canvas = np.zeros((4200, 1150 + 2 * PAD, 4), np.float32)
+        lay = legs(canvas, lambda x: x + PAD, 0, sg)
+        ys, xs = np.nonzero(lay[..., 3] > 0.01)
+        x0, y0 = xs.min() - 6, ys.min() - 6
+        crop = lay[y0:ys.max() + 7, x0:xs.max() + 7]
+        save(f"{OUT}/leg_{side}.png", crop)
+        hx = PAD + 575 + sg * 232
+        joints = dict(hip=[hx, CROTCH - 80], knee=[hx + sg * 3, 3080], ankle=[hx, ANKLE - 20])
+        leg_j[side] = dict(file=f"leg_{side}.png", hip_body=joints["hip"], **{k: [v[0] - int(x0), v[1] - int(y0)] for k, v in joints.items()})
     j = dict(credit="Drawing: Ben (arms and jacket sides: code stand-ins)",
              pad=PAD, hand=dict(skin_bgr=list(SKIN), length=360), upper_arm=dict(file="upper_arm.png", **{k: list(v) for k, v in ua_j.items()}),
              forearm=dict(file="forearm.png", **{k: list(v) for k, v in fa_j.items()}),
-             shoulders=dict(left=[PAD - 85, 1455], right=[PAD + 1150 + 90, 1430]), arm_width=230)
+             shoulders=dict(left=[PAD - 85, 1455], right=[PAD + 1150 + 90, 1430]), arm_width=230,
+             legs=leg_j, leg_width=270, sole_y=SOLE)
     json.dump(j, open(f"{OUT}/parts.json", "w"), indent=1)
     print("wrote", OUT)
 

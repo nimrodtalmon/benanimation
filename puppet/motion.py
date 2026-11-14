@@ -27,6 +27,20 @@ class Spring:
         self.x = self.x + self.v * dt
         return self.x
 
+    def at(self, target, t):
+        """Advance to time t (catching up frame by frame from the last call, with this target), so a
+        frame looks the same whether it is rendered in a video or alone as a still. A jump back in
+        time (a new shot that started earlier) or a long gap settles on the target."""
+        last = getattr(self, "t", None)
+        n = 1 if last is None else int(round((t - last) * FPS))
+        if last is None or n < 0 or n > 4 * FPS:
+            self.x, self.v = np.array(target, float), np.zeros_like(np.array(target, float))
+        else:
+            for _ in range(max(n, 0)):
+                self.step(target)
+        self.t = t
+        return self.x
+
 
 class HeadMotion:
     """Head and body motion like a performer, not a metronome: the head holds a pose, then moves
@@ -101,3 +115,60 @@ def decay_since(t, times, tau):
     return math.exp(-(t - times[i]) / tau) if i >= 0 else 0.0, (t - times[i]) if i >= 0 else 9.0
 
 
+
+
+class Path:
+    """A position over time from keyframes [(t, x), ...]: holds between keys, eased moves (no jumps)."""
+
+    def __init__(self, keys):
+        self.keys = sorted(keys)
+
+    def x(self, t):
+        k = self.keys
+        if t <= k[0][0]:
+            return float(k[0][1])
+        for (t0, x0), (t1, x1) in zip(k[:-1], k[1:]):
+            if t <= t1:
+                u = (t - t0) / max(1e-6, t1 - t0)
+                e = u * u * (3 - 2 * u)
+                return float(x0 + (x1 - x0) * e)
+        return float(k[-1][1])
+
+    def v(self, t, dt=1 / 60):
+        return (self.x(t + dt) - self.x(t - dt)) / (2 * dt)
+
+
+class Walk:
+    """Front-view walk along a Path (the cut-out style: the body faces us, the legs step).
+    Each foot stays planted while the body passes over it, then swings to the next spot with a
+    lift; the hips bob twice per cycle. All in screen pixels for one character instance.
+
+      walk = Walk(path, stride_px, lift_px)
+      walk.feet(t) -> {"l": (foot_x, lift), "r": ...}, bob_px, speed (0..1)"""
+
+    def __init__(self, path, stride, lift, bob=None, v_full=None):
+        self.path, self.stride, self.lift = path, stride, lift
+        self.bob = bob if bob is not None else 0.12 * lift
+        self.v_full = v_full or 1.6 * stride  # px/s that counts as a full walk
+
+    def feet(self, t):
+        x = self.path.x(t)
+        sp = min(1.0, abs(self.path.v(t)) / self.v_full)
+        d = x  # distance along the (horizontal) path
+        out = {}
+        for side, off in (("l", 0.0), ("r", 0.5)):
+            u = d / self.stride + off
+            n = math.floor(u)
+            fr = u - n
+            plant = lambda m: (m + 0.25 - off) * self.stride  # noqa: E731  foot spot (distance) for step m
+            if fr < 0.5:  # stance: foot on the floor
+                fx, lift = plant(n), 0.0
+            else:  # swing to the next spot
+                w = (fr - 0.5) / 0.5
+                e = w * w * (3 - 2 * w)
+                fx = plant(n) + (plant(n + 1) - plant(n)) * e
+                lift = math.sin(math.pi * w)
+            # standing still: feet settle under the hips
+            out[side] = (x + (fx - x) * sp, lift * sp)
+        bob = self.bob * sp * abs(math.sin(2 * math.pi * d / self.stride))
+        return out, bob, sp

@@ -54,12 +54,20 @@ timing from `song` (never from a global), so it works in any clip with any song.
    - `marker()` re-renders any code-drawn sprite in a marker look: flat tones, streaks, wobbly
      ink, white highlight dashes.
 7. **Motion.** `puppet/motion.py`
+   - `Path` (eased keyframed positions) and `Walk` (front-view walk: planted feet, swing with a
+     lift, hip bob). A character given `walk=Path(...)` draws separate legs (`limb.Limb` with
+     thigh/shin foreshortening `up_k`/`fore_k`).
+   - `Spring.at(target, t)` catches up frame by frame, so a still equals the same video frame.
    - `HeadMotion`: holds a pose, eases to a new one, nods on accents, blinks at irregular times.
    - `Spring`: smooth following motion.
    - `decay_since`: jumps on a hit, then decays.
    - Every move is timed from `src/song.json` (drums, strums, sung notes) and the vocal loudness.
-8. **Shots.** `production.py` (`Production`): stage lights, crowd, camera push, a shot list,
+8. **Props in the world.** `props.mic_stand`; `hand.render(..., show_hand=False)` draws a held object
+   alone (a mic on a stand) so a character can pick it up (`Singer(stand=dict(x, grab))`).
+9. **Shots.** `production.py` (`Production`): stage lights, crowd, camera push, a shot list,
    credits. It renders the clip in two halves in parallel. `stills` renders single frames for checking.
+   A shot may carry options `(t0, t1, who, dict(zoom=(a, b), focus=(x, y) or focus(t)))` for push-ins
+   and pans; `Production(cue=...)` sets lights per moment (`beams`, a white `spot` at x, `house` level).
 
 ## Adding a character (checklist)
 
@@ -97,3 +105,11 @@ timing from `song` (never from a global), so it works in any clip with any song.
 - **Style consistency:** run code-drawn props through `props.marker()`. Smooth CG shading next to
   marker drawings looks wrong.
 - **Check frames** at full size, on crops, for every shot, before each full render.
+- **Front-view walking:** a foot's travel along the walk mostly goes toward or away from the camera.
+  Show only ~a quarter of it sideways and show the lift as a shorter leg. Full sideways travel reads
+  as kicking.
+- **Springs must be time-aware.** Otherwise stills (and the first frame of a shot) show arms flung
+  around by a spring that skipped time.
+- **Clip 2 (`clips/soundcheck`)** was written against the toolkit only. What it needed and added
+  there: walking, legs, picking up a prop, light cues, camera pans. The next clip should need
+  less new code.

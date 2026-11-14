@@ -86,6 +86,7 @@ class Limb:
         self.a2_0 = math.atan2(*(self.W0 - self.E0)[::-1])
         self.width, self.inner, self.fold_shadow = width, inner, fold_shadow
         self.fore_k = 1.0  # forearm foreshortening (1 = as drawn; < 1 = pointing toward the camera)
+        self.up_k = 1.0  # same for the upper part (a thigh when the knee comes toward the camera)
         h, w = upper.shape[:2]
         X, Y = np.meshgrid(np.arange(w, dtype=np.float32), np.arange(h, dtype=np.float32))
         u1 = (self.E0 - self.S0) / self.L1
@@ -109,12 +110,12 @@ class Limb:
 
     def solve(self, S, T, scale):
         """IK for this arm (it bends toward its inner side): shoulder, wrist target -> elbow, wrist."""
-        return ik(S, T, self.L1 * scale, self.L2 * scale * self.fore_k, -self.inner)
+        return ik(S, T, self.L1 * scale * self.up_k, self.L2 * scale * self.fore_k, -self.inner)
 
     def _poses(self, S, E, Wr, scale):
         a1 = math.atan2(*(np.asarray(E, float) - S)[::-1])
         a2 = math.atan2(*(np.asarray(Wr, float) - E)[::-1])
-        return (_rot(a1 - self.a1_0, self.S0, S, scale),
+        return (_rot(a1 - self.a1_0, self.S0, S, scale, self.a1_0, self.up_k),
                 _rot(a2 - self.a2_0, self.E0, E, scale, self.a2_0, self.fore_k), a1, a2)
 
     def grip(self, S, E, Wr, scale):

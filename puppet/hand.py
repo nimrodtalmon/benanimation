@@ -131,7 +131,7 @@ class Hand:
         out.append(dict(id="palm", grp="palm", p0=(0.06, 0.10, -0.01), p1=pts[1] * 0.55 + pts[0] * 0.45, r0=0.08, r1=0.058, zs=0.55))
         return out
 
-    def render(self, pose, R, size, at, anchor=(0.0, 0.0, 0.0), held=(), ss=3):
+    def render(self, pose, R, size, at, anchor=(0.0, 0.0, 0.0), held=(), ss=3, show_hand=True):
         """R: 3x3 hand orientation (orient()); size: hand length in px; at: world position of the
         hand-space point `anchor`. held: parts in hand space: dict(p0, p1, r0, r1, color, gloss,
         mesh) - capsules (p1 = p0 for a ball)."""
@@ -139,7 +139,7 @@ class Hand:
         Mr = np.diag([-1.0, 1, 1]) if self.mirror else np.eye(3)
         T = R @ Mr
         P = lambda p: T @ np.asarray(p, float)  # noqa: E731
-        parts = self.parts(pose)
+        parts = self.parts(pose) if show_hand else []  # show_hand=False: only the object (a mic on a stand)
         for k, h in enumerate(held):
             q = dict(h)
             q.setdefault("id", f"held{k}")

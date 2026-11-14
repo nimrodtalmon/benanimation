@@ -30,6 +30,8 @@ def stage_light(frame, t):
 def finish(frame, t, f, n, rng, credit, zoom=(1.0, 1.06), focus=(W / 2, H * 0.42)):
     z = zoom[0] + (zoom[1] - zoom[0]) * f / max(1, n - 1)
     C = cv2.getRotationMatrix2D((focus[0] + 8 * math.sin(t * 0.8), focus[1]), 0, z)
+    C[0, 2] += W / 2 - focus[0]  # the focus point is brought to the frame center (a pan)
+    C[1, 2] += H * 0.42 - focus[1]
     frame = cv2.warpAffine(frame, C, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
     if not hasattr(finish, "vign"):
         yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
@@ -76,16 +78,37 @@ class Stage:
             m = cv2.resize(m, (W, H), interpolation=cv2.INTER_LINEAR)[..., None]
             self.beams.append((m, np.array(self.COLORS[i], np.float32)))
 
-    def frame(self, t, wide=False):
+    def frame(self, t, wide=False, cue=None):
+        """cue (optional): dict(beams=0..1 colored lights, spot=(x, k) a white spotlight at x,
+        house=0..1 overall level); a clip sets it per frame (e.g. lights coming up on the chorus)."""
+        cue = cue or {}
         SPB, BAR = self.song.spb, self.song.bar
         ph = (t % SPB) / SPB
         beat = math.exp(-ph * 5)
         bar = int(t / BAR) % 4
         img = self.base.copy()
+        bk = cue.get("beams", 1.0)
         for i, (m, col) in enumerate(self.beams):
             k = 0.10 + (0.30 * beat if i == bar else 0.04 * math.sin(t * 0.9 + i))
-            img += m * col * k * 1.3
-        return img
+            img += m * col * k * 1.3 * bk
+        if cue.get("spot"):
+            x, k = cue["spot"]
+            img += self.spot(x) * k
+        return img * cue.get("house", 1.0)
+
+    def spot(self, x):
+        """A white spotlight from above at screen x: soft cone and a pool on the floor."""
+        if not hasattr(self, "_spot"):
+            hw, hh = W // 4, H // 4
+            m = np.zeros((hh, hw * 3), np.float32)
+            c = hw * 1.5
+            cv2.fillConvexPoly(m, np.round(np.array([[c - 6, -5], [c + 6, -5], [c + hw * 0.16, hh * 0.86], [c - hw * 0.16, hh * 0.86]])).astype(np.int32), 0.22, cv2.LINE_AA)
+            cv2.ellipse(m, (int(c), int(hh * 0.88)), (int(hw * 0.2), int(hh * 0.05)), 0, 0, 360, 0.55, -1, cv2.LINE_AA)
+            m = cv2.GaussianBlur(m, (0, 0), 5)
+            self._spot = cv2.resize(m, (W * 3, H), interpolation=cv2.INTER_LINEAR)[..., None] * np.array([0.95, 0.97, 1.0], np.float32)
+        x0 = int(1.5 * W - x)
+        x0 = max(0, min(2 * W, x0))
+        return self._spot[:, x0:x0 + W]
 
 
 def crowd(frame, t, spb, n=13, h=240, seed=4):
@@ -117,11 +140,12 @@ def crowd(frame, t, spb, n=13, h=240, seed=4):
 
 
 class Production:
-    def __init__(self, song, cast, shots, name, crowd_in=(), zoom_wide=(1.04, 1.0), zoom=(1.0, 1.05), script=None):
+    def __init__(self, song, cast, shots, name, crowd_in=(), zoom_wide=(1.04, 1.0), zoom=(1.0, 1.05), script=None, cue=None):
         self.song, self.cast_f, self.shots, self.name = song, cast, shots, name
         self.crowd_in = set(crowd_in)
         self.zoom_wide, self.zoom = zoom_wide, zoom
         self.script = script
+        self.cue = cue  # cue(t, shot) -> Stage cue dict (lights per moment and shot)
         self.cast = {}
         self.stage = Stage(song)
 
@@ -135,12 +159,15 @@ class Production:
         return out
 
     def shot_at(self, t):
-        return next(sh for sh in self.shots if sh[0] <= t < sh[1])
+        sh = next(sh for sh in self.shots if sh[0] <= t < sh[1])
+        return sh if len(sh) == 4 else (sh[0], sh[1], sh[2], {})
 
     def frame(self, t, f, rng):
-        a, b, shot = self.shot_at(t)
+        """A shot is (t0, t1, who) or (t0, t1, who, opts); opts: zoom=(start, end), focus=(x, y) or
+        focus(t) -> (x, y) for a pan."""
+        a, b, shot, opts = self.shot_at(t)
         wide = isinstance(shot, (tuple, list))
-        frame = self.stage.frame(t, wide)
+        frame = self.stage.frame(t, wide, self.cue(t, shot) if self.cue else None)
         who = self.who(shot)
         for w in who:
             if hasattr(w, "advance"):
@@ -151,7 +178,11 @@ class Production:
         frame = stage_light(frame, t)
         k = (t - a) / (b - a)
         credit = list(dict.fromkeys([w.j["credit"] for w in who])) + [self.song.credit]
-        return finish(frame, t, int(k * 100), 101, rng, credit, zoom=self.zoom_wide if wide else self.zoom)
+        zoom = opts.get("zoom", self.zoom_wide if wide else self.zoom)
+        focus = opts.get("focus", (W / 2, H * 0.42))
+        if callable(focus):
+            focus = focus(t)
+        return finish(frame, t, int(k * 100), 101, rng, credit, zoom=zoom, focus=focus)
 
     def render(self, t0, t1, out, frames=None):
         n0, n1 = int(round(t0 * FPS)), int(round(t1 * FPS))
@@ -202,7 +233,7 @@ class Production:
             self.render_all()
         elif what in self.cast_f:  # one character alone: <name> [start dur]
             start, dur = (float(argv[2]), float(argv[3])) if len(argv) > 3 else (8.0, 6.0)
-            self.shots = [(0, self.song.duration + 1, what)]
+            self.shots = [(0, self.song.duration + 1, what, {})]
             out = f"{ROOT}/out/{self.name}-{what}.mp4"
             tmp = out + ".v.mp4"
             self.render(start, start + dur, tmp)

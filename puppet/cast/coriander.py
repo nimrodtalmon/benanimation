@@ -160,7 +160,7 @@ class Guitarist:
         # strumming forearm: rotate about the elbow; fretting hand: slide along the neck
         th = 0.0  # (her arms are limbs now)
         ci = max(0, np.searchsorted([c[0] for c in self.chords], t + 0.08) - 1)
-        fpos = float(self.fret.step(CHORD_POS.get(self.chords[ci][1], 0.0)))
+        fpos = float(self.fret.at(CHORD_POS.get(self.chords[ci][1], 0.0), t))
         d_neck = np.array([math.cos(self.g_angle), math.sin(self.g_angle)])
         X, Y = p.X, p.Y
         px, py = self.piv_strum

@@ -7,6 +7,7 @@ import cv2
 import numpy as np
 
 import hand as handrig
+import props
 import warp
 from limb import Limb, join_parts
 from motion import HeadMotion, Spring
@@ -20,14 +21,18 @@ FPS, W, H = warp.FPS, warp.W, warp.H
 class Singer:
     PARTS = f"{ROOT}/public/parts/distor"
 
-    def __init__(self, song=None, scale=0.5, cx=W / 2, top=60):
+    def __init__(self, song=None, scale=0.5, cx=W / 2, top=60, walk=None, stand=None, pump_after=20.0):
+        """walk: a motion.Path of his center x on screen (he walks; separate legs). stand: dict(x, grab)
+        - a mic stand at screen x; the mic is on it until time `grab`, when he takes it.
+        pump_after: from this time the free arm pumps on beats 1 and 3 while singing."""
         self.song = song or Song.default()
+        self.path, self.stand_cfg, self.pump_after = walk, stand, pump_after
         j = json.load(open(f"{self.PARTS}/parts.json"))
         pad = j["pad"]
         base = warp.CHARS["distor"]
         sx = lambda v: v + pad  # noqa: E731
         cfg = dict(base)
-        cfg.update(full="public/parts/distor/body.png", src_h=1600, height=1600 * scale, crop_h_src=(H - top) / scale + 120,
+        cfg.update(full="public/parts/distor/" + ("body_nolegs.png" if walk else "body.png"), src_h=1600, height=1600 * scale, crop_h_src=(H - top) / scale + 120,
                    head_ells=[(sx(x), y, rx, ry) for x, y, rx, ry in base["head_ells"]],
                    neck=(sx(base["neck"][0]), sx(base["neck"][1]), base["neck"][2], base["neck"][3]),
                    face=(sx(base["face"][0]),) + tuple(base["face"][1:]), pivot=(sx(base["pivot"][0]), base["pivot"][1]),
@@ -39,7 +44,20 @@ class Singer:
         self.s = scale
         self.cfg, self.j = cfg, j
         hl, wl = self.p.head.shape[:2]
+        self.wl = wl
         self.x0, self.top = int(cx - wl / 2), top
+        self.legs = None
+        if walk is not None:
+            from motion import Walk
+            self.legs = {}
+            for side in ("l", "r"):
+                lj = j["legs"][side]
+                img = load_rgba(f"{self.PARTS}/{lj['file']}")
+                jj = dict(shoulder=lj["hip"], elbow=lj["knee"], wrist=lj["ankle"])
+                self.legs[side] = (Limb(img, img, jj, j["leg_width"], inner=1 if side == "l" else -1, fold_shadow=0.0), lj["hip_body"])
+            L = self.legs["l"][0]
+            leg_px = (L.L1 + L.L2) * scale
+            self.walker = Walk(walk, stride=0.75 * leg_px, lift=0.16 * leg_px)
         up = load_rgba(f"{self.PARTS}/{j['upper_arm']['file']}")
         fo = load_rgba(f"{self.PARTS}/{j['forearm']['file']}")
         u, f, jt = join_parts(up, fo, j["upper_arm"], j["forearm"])
@@ -78,14 +96,63 @@ class Singer:
     def world(self, q, y_off=0.0):
         return np.array([self.x0 + q[0] * self.s, self.top + y_off + q[1] * self.s])
 
+    def draw_legs(self, frame, t, bob):
+        """Each foot from the walk cycle; the knee comes toward us when the foot lifts (both bones
+        foreshortened, a slight outward knee), the leg drawn behind the jacket."""
+        s = self.s
+        feet, _, _ = self.walker.feet(t)
+        for side in ("l", "r"):
+            L, hip_body = self.legs[side]
+            hip = self.world(hip_body, bob)
+            fx, lift = feet[side]
+            # front view: the foot's travel along the walk is mostly toward/away from the camera, so
+            # only a quarter of it shows sideways; the lift shows as a raised, shortened leg
+            fx = 0.25 * (fx - self.cx) + hip[0]
+            leg = (L.L1 + L.L2) * s
+            foot = np.array([fx, hip[1] + leg * (1 - 0.22 * lift)])
+            v = foot - hip
+            d = np.hypot(*v)
+            out = (-1 if side == "l" else 1) * 0.04 * leg * lift
+            E = hip + v * L.L1 / (L.L1 + L.L2) + np.array([out, 0])
+            L.up_k = np.hypot(*(E - hip)) / (L.L1 * s)
+            L.fore_k = np.hypot(*(foot - E)) / (L.L2 * s)
+            lay, (x, y) = L.render(hip, E, foot, s, (W, H))
+            if lay is not None:
+                warp.over(frame, lay, x, y)
+
+    def stand_mic(self, frame, t, bob):
+        """The stand (drawn behind him) and, before the grab, the mic in its clip."""
+        st = self.stand_cfg
+        s = self.s
+        floor = self.world((0, self.j["sole_y"]), 0)[1]
+        top = self.world((0, 860), 0)[1]  # clip at mouth height
+        x = st["x"]
+        props.mic_stand(frame, x, top, floor, s)
+        if t < st["grab"]:
+            phi = math.radians(-90 + 12)
+            yaw = math.degrees(phi - self.mic_a0)
+            R = handrig.orient(yaw, 0, 180)
+            g = np.array([0.0, 0.44, -0.115])
+            img, xy, frac = self.mic_hand.render(handrig.POSES["mic"], R, self.hand_size, (x, top), anchor=g, held=self.mic, show_hand=False)
+            over_sub(frame, img, xy, frac)
+        return np.array([x, top])
+
     def draw(self, frame, t):
         p, cfg = self.p, self.cfg
+        walk_bob, speed = 0.0, 0.0
+        if self.path is not None:
+            self.cx = self.path.x(t)
+            self.x0 = int(self.cx - self.wl / 2)
+            _, walk_bob, speed = self.walker.feet(t)
+        stand_top = self.stand_mic(frame, t, 0) if self.stand_cfg else None
         f = min(int(t * FPS), len(self.env) - 1)
         ph = (t % self.song.spb) / self.song.spb
         on_beat = math.cos(math.pi * ph) ** 2
         singing = self.sing[f]
         turn, tilt, nod, blink, sway = self.motion.at(t)
         turn *= 0.7 if singing else 1.0  # sings mostly toward the mic
+        if self.path is not None:  # looks where he walks
+            turn = float(turn * (1 - speed) + 0.45 * np.sign(self.path.v(t)) * speed)
         sway = sway * 40 * p.s + 3 * p.s * math.sin(t * 2.3)
         fig = p.head_frame(turn, float(self.env[f]), self.vowels[f], blink, sway)
         th = math.radians(tilt) * p.w_bend
@@ -95,7 +162,9 @@ class Singer:
         mapx = px + c * ox + sn * oy
         mapy = py - sn * ox + c * oy - nod * p.w_bend
         fig = cv2.remap(fig, mapx.astype(np.float32), mapy.astype(np.float32), cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-        bob = 2.5 * math.sin(t * 1.7) + 0.35 * nod  # breathing, and the shoulders follow a nod a little
+        bob = 2.5 * math.sin(t * 1.7) + 0.35 * nod - walk_bob  # breathing, a nod, the walk's bounce
+        if self.legs:
+            self.draw_legs(frame, t, bob)
         warp.over(frame, fig, self.x0, int(self.top + bob))
         # where the mouth is now (after turn, tilt and nod)
         mx, my, mw, J = p.mouth
@@ -107,15 +176,18 @@ class Singer:
         shL = self.world(self.j["shoulders"]["left"], bob)
         shR = self.world(self.j["shoulders"]["right"], bob)
         # the free arm (viewer's right): hangs and swings; in the chorus it pumps on beats 1 and 3
-        chorus = t >= 20.0
+        chorus = t >= self.pump_after
         beat_i = int(t / self.song.spb) % 4
         pump = chorus and singing and beat_i in (0, 2) and ph < 0.5
-        free_t = shR + np.array([-60, 980]) * s + np.array([12 * math.sin(t * 2.0), 0]) * s
+        swing = 0.0
+        if self.path is not None:  # arms swing against the legs
+            swing = 160 * speed * math.sin(2 * math.pi * self.path.x(t) / self.walker.stride)
+        free_t = shR + np.array([-60, 980]) * s + np.array([12 * math.sin(t * 2.0) + swing, 0]) * s
         if pump:
             free_t = shR + np.array([-180, 420 - 160 * math.sin(math.pi * ph * 2)]) * s
         if self.free is None:
             self.free = Spring(free_t, omega=6.0, zeta=0.95)
-        wt = self.free.step(free_t)
+        wt = self.free.at(free_t, t)
         E, Wr = self.arm_r.solve(shR, wt, s)
         fa = math.degrees(math.atan2(Wr[1] - E[1], Wr[0] - E[0])) - 90
         img, xy, frac = self.free_hand.render(handrig.POSES["fist" if pump else "relaxed"], handrig.orient(fa, 10, 0), self.hand_size, Wr, anchor=self.anchor)
@@ -123,14 +195,37 @@ class Singer:
         lay, (x, y) = self.arm_r.render(shR, E, Wr, s, (W, H))
         if lay is not None:
             warp.over(frame, lay, x, y)
+        L = self.arm_l
+        if self.stand_cfg and t < self.stand_cfg["grab"]:
+            # empty hand: swings while walking, reaches for the mic on the stand before the grab
+            g0 = self.stand_cfg["grab"]
+            reach = float(np.clip((t - (g0 - 0.7)) / 0.7, 0, 1))
+            reach = reach * reach * (3 - 2 * reach)
+            hang = shL + np.array([60, 980]) * s + np.array([-swing * s, 0])
+            tgt = hang * (1 - reach) + (stand_top + np.array([0, 0.25 * self.hand_size])) * reach
+            if not hasattr(self, "_reach"):
+                self._reach = Spring(tgt, omega=7.0, zeta=0.95)
+            wt = self._reach.at(tgt, t)
+            E, Wr = L.solve(shL, wt, s)
+            fa = math.degrees(math.atan2(Wr[1] - E[1], Wr[0] - E[0])) - 90
+            pose = handrig.Pose.mix(handrig.POSES["relaxed"], handrig.POSES["mic"], 0.6 * reach)
+            img, xy, frac = self.mic_hand.render(pose, handrig.orient(fa, 10, 0), self.hand_size, Wr, anchor=self.anchor)
+            over_sub(frame, img, xy, frac)
+            lay, (x, y) = L.render(shL, E, Wr, s, (W, H))
+            if lay is not None:
+                warp.over(frame, lay, x, y)
+            return
         # the mic arm: up to the mouth while singing, down at the chest in pauses
         u = float(np.clip(self.up.step(self.sing[f]), 0, 1))
         u = u * u * (3 - 2 * u)
         head_up = mouth + np.array([-0.10 * mw, 1.45 * mw])
         head_dn = mouth + np.array([-2.0 * mw, 5.0 * mw])
         head = head_dn * (1 - u) + head_up * u
+        if self.stand_cfg:  # just after the grab: the mic comes from the stand
+            k = float(np.clip((t - self.stand_cfg["grab"]) / 0.6, 0, 1))
+            k = k * k * (3 - 2 * k)
+            head = stand_top * (1 - k) + head * k
         phi = math.radians(-90 + (-5 * (1 - u) + 22 * u) + 4 * math.sin(t * 1.3))  # mic axis on screen (up = -90)
-        L = self.arm_l
         fore = getattr(self, "_fore", -math.pi / 4)
         Mr = np.eye(3)
         ax = np.array([1.0, 0, 0])
