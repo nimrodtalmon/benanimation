@@ -15,6 +15,9 @@ a few pages. The app for uploading them: talmonlab.bgu.ac.il/ben/ (code in `ben-
 8. Hand holding a mic (fist, thumb on top).
 9. Open hand, relaxed.
 10. Leg and shoe (optional).
+11. Head turned halfway (3/4), and 12. body turned halfway (3/4), no arms/head/legs: for walking
+    across the stage (a front-facing body sliding sideways reads as stiff; the code fakes it with a
+    head turn until these exist).
 
 Plain white paper, closed black outlines, all parts at the same scale, photo from straight above.
 His own mouths, closed eyes and hands replace the code stand-ins (they looked better every time).
