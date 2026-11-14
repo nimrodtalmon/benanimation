@@ -48,6 +48,9 @@ def puppet_cfg(name, j, scale, crop_h_src, body_file=None, src_h=None):
                eye_hide=[(sx(x), y, rx, ry) for x, y, rx, ry in hd.get("eye_hide", [])])
     if "lid_color" in hd:
         cfg["lid_color"] = (sx(hd["lid_color"][0]), hd["lid_color"][1])
+    cfg.setdefault("lid_from", 150)  # defaults, for rigs that leave them out
+    cfg.setdefault("lash", (20, 18, 19))
+    cfg.setdefault("lash_w", 12)
     return cfg
 
 

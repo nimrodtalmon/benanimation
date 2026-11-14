@@ -323,6 +323,14 @@ def over_sub(dst, img, xy, frac):
     over(dst, img, int(xy[0]), int(xy[1]))
 
 
+_MEAN3 = np.full((1, 3), 1 / 3, np.float32)
+
+
+def mean3(img):
+    """Mean of the 3 color channels (fast: cv2.transform instead of numpy's mean over the last axis)."""
+    return cv2.transform(np.ascontiguousarray(img[..., :3], dtype=np.float32), _MEAN3)
+
+
 def over(dst, src, x, y):
     """Alpha-composite BGRA float src onto BGR float dst at (x, y)."""
     h, w = src.shape[:2]

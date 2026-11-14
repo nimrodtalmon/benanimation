@@ -131,11 +131,13 @@ class Hand:
         out.append(dict(id="palm", grp="palm", p0=(0.06, 0.10, -0.01), p1=pts[1] * 0.55 + pts[0] * 0.45, r0=0.08, r1=0.058, zs=0.55))
         return out
 
-    def render(self, pose, R, size, at, anchor=(0.0, 0.0, 0.0), held=(), ss=3, show_hand=True):
+    def render(self, pose, R, size, at, anchor=(0.0, 0.0, 0.0), held=(), ss=None, show_hand=True):
         """R: 3x3 hand orientation (orient()); size: hand length in px; at: world position of the
         hand-space point `anchor`. held: parts in hand space: dict(p0, p1, r0, r1, color, gloss,
         mesh) - capsules (p1 = p0 for a ball)."""
         st = self.st
+        if ss is None:  # supersampling: flat (marker) hands have no fine shading to resolve
+            ss = 2 if st.flat else 3
         Mr = np.diag([-1.0, 1, 1]) if self.mirror else np.eye(3)
         T = R @ Mr
         P = lambda p: T @ np.asarray(p, float)  # noqa: E731

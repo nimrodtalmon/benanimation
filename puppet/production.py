@@ -240,9 +240,9 @@ class HandDrawn:
             mx, my = self.maps(f)
             frame = cv2.remap(frame, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
         if self.paper > 0:
-            frame = frame * (1 + self.paper * self.tex * (0.35 + frame.mean(2, keepdims=True)))
+            frame = frame * (1 + self.paper * self.tex * (0.35 + warp.mean3(frame)[..., None]))
         if self.grade > 0:
-            lum = frame.mean(2, keepdims=True)
+            lum = warp.mean3(frame)[..., None]
             sh = np.clip(1 - lum * 2.5, 0, 1) * np.array([0.035, 0.02, -0.01], np.float32)  # teal shadows (BGR)
             hi = np.clip(lum * 2 - 1, 0, 1) * np.array([-0.03, 0.0, 0.04], np.float32)  # warm highlights
             c = np.clip(frame, 0, 1)

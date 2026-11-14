@@ -32,13 +32,22 @@ def _poly(img, pts, color, ink=7, ss=4):
 
 
 def _line(img, pts, width, closed=False, color=INK, ss=4):
+    """An anti-aliased line (supersampled), drawn only in the box around it (fast on big images)."""
     h, w = img.shape[:2]
-    P = np.round(np.asarray(pts, np.float64) * ss * 8).astype(np.int32)
-    m = np.zeros((h * ss, w * ss), np.uint8)
+    pts = np.asarray(pts, np.float64)
+    pad = int(width) + 3
+    x0, y0 = max(0, int(pts[:, 0].min()) - pad), max(0, int(pts[:, 1].min()) - pad)
+    x1, y1 = min(w, int(pts[:, 0].max()) + pad + 1), min(h, int(pts[:, 1].max()) + pad + 1)
+    if x1 <= x0 or y1 <= y0:
+        return
+    bw, bh = x1 - x0, y1 - y0
+    P = np.round((pts - [x0, y0]) * ss * 8).astype(np.int32)
+    m = np.zeros((bh * ss, bw * ss), np.uint8)
     cv2.polylines(m, [P], closed, 255, max(1, int(width * ss)), cv2.LINE_AA, shift=3)
-    m = cv2.resize(m, (w, h), interpolation=cv2.INTER_AREA).astype(np.float32)[..., None] / 255
-    img[..., :3] = img[..., :3] * (1 - m) + np.asarray(color, np.float32) * m
-    img[..., 3:4] = np.maximum(img[..., 3:4], m)
+    m = cv2.resize(m, (bw, bh), interpolation=cv2.INTER_AREA).astype(np.float32)[..., None] / 255
+    reg = img[y0:y1, x0:x1]
+    reg[..., :3] = reg[..., :3] * (1 - m) + np.asarray(color, np.float32) * m
+    reg[..., 3:4] = np.maximum(reg[..., 3:4], m)
 
 
 def _ellipse_pts(cx, cy, rx, ry, a0=0, a1=2 * math.pi, n=80, rot=0.0):
@@ -85,6 +94,32 @@ def microphone(L=330):
     _line(img, _ellipse_pts(cx, hy, head_r, head_r), 6, closed=True)
     _line(img, [(cx - head_r + 6, hy + 4), (cx + head_r - 6, hy + 4)], 4)  # seam across the grille
     return img, dict(grip=(cx, (y0 + y1) / 2 - 15), head=(cx, hy))
+
+
+_MIC = {}
+
+
+def mic_boom(dst, mouth, s, side=-1, floor=None, reach=1.0):
+    """A boom mic stand: the stand beside the singer (side -1: viewer's left), a boom arm reaching
+    in, the mic just under and in front of the mouth, pointing at it. mouth: screen point; s: the
+    singer's scale (screen px per drawing px, at drawing heads ~900 px tall)."""
+    H_ = dst.shape[0]
+    floor = H_ + 40 if floor is None else floor
+    mx, my = mouth
+    mic_at = np.array([mx + side * 40 * s, my + 150 * s])  # the grille, below the chin, a little to the side
+    pole_x = mx + side * 620 * s * reach
+    top = np.array([pole_x, my + 330 * s])
+    w = max(3, int(14 * s))
+    pole(dst, (pole_x, floor), top, w)
+    elbow = top + (mic_at - top) * 0.82
+    pole(dst, top, elbow, max(3, int(10 * s)))
+    key = int(round(330 * s * 1.2))
+    if key not in _MIC:
+        _MIC[key] = microphone(330)
+    img, anc = _MIC[key]
+    ang = math.atan2(my - mic_at[1], mx - mic_at[0]) + math.pi / 2  # the mic's head points at the mouth
+    M = place(img, anc["head"], mic_at, ang, 1.1 * s)
+    blit(dst, img, M)
 
 
 def place(prop, anchor, world, angle, scale):

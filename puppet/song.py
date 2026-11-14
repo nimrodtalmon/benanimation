@@ -34,6 +34,14 @@ class Song:
         return cls("src/song.json", "public/song/song.wav", "public/song/vocals.wav",
                    "Song: 'silence in the air' by JeffSpeed68 (ccmixter.org, CC BY-NC 3.0) + our drums")
 
+    @classmethod
+    def load(cls, sid):
+        """A song brought in with puppet/new_song.py: public/songs/<sid>/ (score, audio, voice, credit)."""
+        d = f"public/songs/{sid}"
+        meta = json.load(open(f"{ROOT}/{d}/song.json")) if os.path.exists(f"{ROOT}/{d}/song.json") else {}
+        voc = f"{d}/vocals.mp3" if os.path.exists(f"{ROOT}/{d}/vocals.mp3") else None
+        return cls(f"{d}/score.json", f"{d}/song.mp3", voc, meta.get("credit", ""))
+
     # ---- a pre-roll (a scene before the music)
     def shifted(self, pre, name="pre", count_in=None, sfx=()):
         """A copy of this song that starts `pre` seconds later (pre: whole bars keeps the beat

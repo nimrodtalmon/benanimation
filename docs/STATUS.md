@@ -40,6 +40,17 @@ Read this first in a new session, then `docs/TOOLKIT.md` (pipeline + lessons).
 - `Production(marker=...)`: how hand-drawn code props look (1 = marker style, 0 = closer to real); the kit got lathed
   cymbals with a lit edge and a shaded bell, smoother coated heads, glossier shells.
 
+## Making a new clip (Nov 14, round 6): song + band -> show
+1. `python3 puppet/new_song.py <audio> <id> --credit "..."` -> `public/songs/<id>/` (score with drums, bass, guitar,
+   vocal syllables + vowels, beats, breaks; the voice as its own track). Check with `tools/score_plot.py`.
+2. A new character: drawings + `public/rigs/<name>.json`, then `python3 puppet/build_bust.py <name>` (kinds: bust with
+   stand-in arms, "hoodie" sketch, "portrait" = head and shoulders only, for side views and close-ups).
+3. A clip script names only the song, the band and the end card: `Show(Song.load(id), [Member(role, rig, sings=, side=)], ...)`
+   (`puppet/show.py`): cast in every shot size (framed from each head's size), shot list, light cues, breaks, flashes,
+   titles, tape trick, flash cuts, camera ladder, lip sync and a boom mic for the singer, profile shots.
+   Examples: `clips/distorted`, `clips/silence_band`.
+- Rendering ~0.58 s/frame (was 0.91): lines drawn only in their box, fast channel means, 2x supersampled flat hands.
+
 ## Feedback (Nov 14)
 - band2: TV effect too much (keep as a dial: `TVStatic(amount, vhs)`); drummer hand looked detached -> fixed (hand sits in the cuff).
 - Ben's band: Distor = drummer, blonde = guitarist (sings most in songs with vocals; all of them sing), bassist = left boys of the band page.

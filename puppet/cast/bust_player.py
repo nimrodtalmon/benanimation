@@ -15,7 +15,7 @@ import numpy as np
 import hand as handrig
 import props
 import warp
-from cast.distor import arms
+import rig
 from groove import Groove
 from motion import Face, HeadMotion, Spring, decay_since
 from props import blit, place
@@ -30,37 +30,28 @@ BASS = dict(neck=2.0, burst=((0.20, 0.20, 0.75), (0.08, 0.06, 0.10)), n_strings=
 
 class BustPlayer:
     def __init__(self, song, name, instrument=None, scale=0.5, cx=W / 2, top=0, head=1.0, seed=3, groove=1.0, style="rock",
-                 face=True, shouts=()):
+                 face=True, shouts=(), sings=False, mic_side=-1):
         """face: expressions from the music (smile in loud parts, brows up on accents, a shout at
-        each time in shouts, e.g. where the band comes back in)."""
+        each time in shouts, e.g. where the band comes back in). sings: the lead voice: the mouth
+        follows the vocal track (shapes on twos, the score's vowels) and a boom mic stands at the
+        mouth (mic_side -1: the stand on the viewer's left)."""
         """groove: how much the body moves with the music (puppet/groove.py; 0 = still)."""
         parts = f"{ROOT}/public/parts/{name}"
         j = json.load(open(f"{parts}/parts.json"))
         self.song, self.name, self.inst = song, name, instrument or j["play"].get("instrument", "guitar")
         self.j = j
-        pad = j["pad"]
-        hd = j["head"]
-        sx = lambda v: v + pad  # noqa: E731
-        cfg = dict(hd, full=f"public/parts/{name}/body.png", src_h=1000, height=1000 * scale,
-                   crop_h_src=(H - top) / scale + 80,
-                   head_ells=[(sx(x), y, rx, ry) for x, y, rx, ry in hd["head_ells"]],
-                   neck=(sx(hd["neck"][0]), sx(hd["neck"][1]), hd["neck"][2], hd["neck"][3]),
-                   face=(sx(hd["face"][0]),) + tuple(hd["face"][1:]), pivot=(sx(hd["pivot"][0]), hd["pivot"][1]),
-                   mouth=(sx(hd["mouth"][0]),) + tuple(hd["mouth"][1:]),
-                   eyes=[(sx(x), y, rx, ry) for x, y, rx, ry in hd["eyes"]])
-        if "lid_color" in hd:
-            cfg["lid_color"] = (sx(hd["lid_color"][0]), hd["lid_color"][1])
+        cfg = rig.puppet_cfg(name, j, scale, (H - top) / scale + 80)
         self.p = warp.Puppet(cfg)
         self.s = scale
         b = j["play"]
         self.b = b
         wl = self.p.head.shape[1]
         self.x0, self.top = int(cx - wl / 2), top
-        self.arm_l, self.arm_r = arms(j, parts, fold_shadow=0.15)
+        self.arm_l, self.arm_r = rig.arms(name, j, fold_shadow=0.15)
         self.arm_r.inner = -self.arm_r.inner  # the fretting elbow hangs down, under the neck
         self.shoulders = {k: np.array(v, float) for k, v in j["shoulders"].items()}
         hs = j["hand"]
-        st = handrig.Style(skin=np.array(hs["skin_bgr"]) / 255, ink=(0.075, 0.07, 0.08), ink_w=0.03, shade=0.0, flat=True)
+        st = rig.hand_style(j)
         self.pick_hand = handrig.Hand(st, mirror=False)
         self.fret_hand = handrig.Hand(st, mirror=True)
         self.hsize = hs["length"] * scale
@@ -88,6 +79,9 @@ class BustPlayer:
         self.face = Face(song, accents=crashes, hits=list(self.hit_t), base_smile=0.05, seed=seed) if face else None
         self.shouts = np.sort(np.asarray(shouts, float))
         self.blinks = j.get("blink", True)  # drawn eye sockets don't blink
+        self.sings, self.mic_side = sings, mic_side
+        if sings:
+            self.voice = song.vocal_drivers()
         self.motion = HeadMotion(seed, acc, song.duration, song.spb, turn_amp=0.4 * head, tilt_amp=3.0 * head, nod_px=8 * scale / 0.5 * head)
 
     def credit(self):
@@ -130,7 +124,13 @@ class BustPlayer:
             mouth = min(0.85, e["mouth"] + 0.75 * shout)
             smile = min(1.0, e["smile"] + 0.45 * en - 0.3 * shout)
             brow, squint = min(1.0, e["brow"] + 0.6 * shout), e["squint"] + 0.25 * shout
-        fig = p.head_frame(turn, mouth, "ah", min(1.0, blink + squint) if self.blinks else 0.0, sway, smile=smile, brow=brow)
+        vowel = "ah"
+        if self.sings:  # the lead voice: mouth shapes on twos, from the vocal track
+            env, vowels, _ = self.voice
+            fi = min(len(env) - 1, (int(t * 30) // 2) * 2)
+            if fi >= 0 and env[fi] > 0.02:
+                mouth, vowel, smile = max(mouth, 0.9 * float(env[fi])), vowels[fi], smile * 0.4
+        fig = p.head_frame(turn, mouth, vowel, min(1.0, blink + squint) if self.blinks else 0.0, sway, smile=smile, brow=brow)
         gv = gv0 if gv0 else dict(rot=0.0, dx=0.0, dy=0.0, nod=0.0)
         u = s / 0.5  # groove units are px at scale 0.5
         nod = nod + gv["nod"] * u
@@ -226,7 +226,7 @@ class BustPlayer:
         gm = cv2.warpAffine(self.g[..., 3], np.vstack([M[0] / 4 + [0, 0, 4 * s], M[1] / 4 + [0, 0, 6 * s]])[:2],
                             (W // 4, H // 4), flags=cv2.INTER_LINEAR)
         gm = cv2.resize(cv2.GaussianBlur(gm, (0, 0), 3 * s + 1), (W, H))[..., None]
-        frame *= 1 - 0.35 * gm * (frame.mean(2, keepdims=True) > 0.25)
+        frame *= 1 - 0.35 * gm * (warp.mean3(frame)[..., None] > 0.25)
         blit(frame, gimg, M)
         props.button(frame, butt, 7 * s)
         props.button(frame, horn, 7 * s)
@@ -237,3 +237,6 @@ class BustPlayer:
         lay, (x, y) = Ll.render(Sl, El, Wrl, s, (W, H), part="fore")
         if lay is not None:
             warp.over(frame, lay, x, y)
+        if self.sings:  # the mic in front of the mouth (its place in the drawing, moved with the body)
+            mx_, my_ = self.j["head"]["mouth"][:2]
+            props.mic_boom(frame, W_((mx_, my_ + nod / max(s, 1e-6) * 0.0)), s * 900 / (2 * self.j["head"]["face"][3]), side=self.mic_side)

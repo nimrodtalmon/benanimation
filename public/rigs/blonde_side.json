@@ -1,0 +1,62 @@
+{
+ "name": "blonde_side",
+ "kind": "portrait",
+ "src": "drawings/ben/dr/blonde-side.jpg",
+ "credit": "Drawing: Ben",
+ "left_edge": 352,
+ "bottom": 1922,
+ "seeds_right": true,
+ "pad": 0,
+ "dark_eyes": true,
+ "blink": false,
+ "head": {
+  "head_ells": [
+   [
+    620,
+    520,
+    380,
+    360
+   ],
+   [
+    700,
+    880,
+    300,
+    360
+   ]
+  ],
+  "neck": [
+   520,
+   820,
+   1200,
+   1420
+  ],
+  "face": [
+   690,
+   780,
+   300,
+   450
+  ],
+  "pivot": [
+   700,
+   1250
+  ],
+  "mouth": [
+   880,
+   1035,
+   90,
+   70
+  ],
+  "chin": 1230,
+  "eyes": [
+   [
+    655,
+    622,
+    158,
+    178
+   ]
+  ],
+  "hair_from": 750,
+  "turn_px": 12
+ },
+ "eye_fill": "convex"
+}

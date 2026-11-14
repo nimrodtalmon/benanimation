@@ -9,6 +9,7 @@ crash: highs that ring on). Bass: onsets + pitch (pYIN). Guitar: onsets of the '
 chords from chroma (major/minor/power templates). Sections: loudness changes on the bar grid.
 """
 import json
+import os
 import sys
 
 import librosa
@@ -158,6 +159,38 @@ def sections(y, bar, duration, t0=0.0):
     return out
 
 
+def vocal(y):
+    """Syllables of the vocal stem -> [{t, dur, vowel, open, pitch}] (the format Song.vocal_drivers
+    reads): onsets of the voice's level, pitch from pYIN, the vowel guessed from how bright the
+    sound is (spectral centroid against the singer's own range: dark oo/oh, middle ah, bright ee)
+    and how open the mouth is from the loudness. Empty if the stem is near silent (instrumentals)."""
+    e = env(y)
+    if np.percentile(e, 99) < 0.01:
+        return []
+    f, _ = onsets(y, 0.1, 0.09)
+    cent = librosa.feature.spectral_centroid(y=y, sr=SR, hop_length=HOP)[0]
+    f0, voiced, _ = librosa.pyin(y, fmin=70, fmax=900, sr=SR, hop_length=HOP * 2)
+    ref = np.percentile(e[f], 90) if len(f) else 1
+    loud = e > 0.15 * ref
+    c_lo, c_hi = np.percentile(cent[loud], [25, 75]) if loud.any() else (1000, 3000)
+    out = []
+    for i, k in enumerate(f):
+        k1 = f[i + 1] if i + 1 < len(f) else len(e) - 1
+        kk = min(k + 3, len(e) - 1)
+        if e[kk] < 0.15 * ref:
+            continue
+        seg = e[k:k1]
+        end = k + (int(np.nonzero(seg < 0.3 * e[kk])[0][0]) if (seg < 0.3 * e[kk]).any() else len(seg))
+        c = float(np.median(cent[k:max(k + 1, end)]))
+        vw = "oo" if c < c_lo * 0.9 else ("oh" if c < c_lo * 1.1 else ("ee" if c > c_hi else "ah"))
+        ps = f0[k // 2: max(k // 2 + 1, end // 2)]
+        ps = ps[np.isfinite(ps)]
+        out.append(dict(t=round(k * HOP / SR, 3), dur=round(max(0.04, (end - k) * HOP / SR), 3), vowel=vw,
+                        open=round(float(np.clip(0.3 + 0.6 * e[kk] / ref, 0.3, 0.9)), 2),
+                        pitch=int(round(float(np.median(librosa.hz_to_midi(ps))))) if len(ps) else None))
+    return out
+
+
 def holes(y, min_len=0.3, level=0.15):
     """Moments where the whole band stops (stop-time breaks): the mix level under `level` of its
     loud level for at least min_len seconds -> [[t0, t1]]."""
@@ -185,6 +218,7 @@ def transcribe(mix, stems, credit=""):
     bt = librosa.frames_to_time(beats, sr=SR, hop_length=HOP)
     bpm = float(np.atleast_1d(tempo)[0])
     yd, yb, yo = load(f"{stems}/drums.wav"), load(f"{stems}/bass.wav"), load(f"{stems}/other.wav")
+    yv = load(f"{stems}/vocals.wav") if os.path.exists(f"{stems}/vocals.wav") else np.zeros(1)
     dr = drums(yd)
     bass = notes(yb, 30, 330)
     gt = notes(yo, 70, 1000, 0.09)
@@ -201,7 +235,7 @@ def transcribe(mix, stems, credit=""):
                 sections=sections(y, 4 * spb, duration, float(bt[0]) if len(bt) else 0.0), credit=credit,
                 drums=[dict(beat=None, piece=d["piece"], vel=d["vel"], t=round(d["t"], 3)) for d in dr],
                 bass=[dict(t=round(b["t"], 3), dur=b["dur"], pitch=b["pitch"], vel=b["vel"]) for b in bass],
-                vocal=[], guitar=guitar)
+                vocal=vocal(yv) if len(yv) > SR else [], guitar=guitar)
 
 
 if __name__ == "__main__":

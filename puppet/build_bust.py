@@ -71,7 +71,7 @@ def crayon(img, mask, side_dir, color, width, amount, seed):
     img[..., :3] = img[..., :3] * (1 - k) + col * k
 
 
-def solid_black(f, regions, dark=0.45):
+def solid_black(f, regions, dark=0.45, convex=False):
     """Inside each region (x, y, rx, ry): find the drawn black shape (dark, grey pixels connected to the
     middle), fill its holes (glare spots) and paint it flat near-black; colored lines on it (red
     cracks) stay. Only the shape itself changes, not the skin around it."""
@@ -89,6 +89,14 @@ def solid_black(f, regions, dark=0.45):
             continue
         m = (lab == k).astype(np.uint8)
         m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (25, 25)))
+        if convex:  # a big glare can open the ring: the shape is its convex outline (eye sockets are round)
+            cs, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+            if cs:
+                m = np.zeros_like(m)
+                cv2.fillPoly(m, [cv2.convexHull(max(cs, key=cv2.contourArea))], 1)
+                ell = np.zeros_like(m)  # ... but never past the shape's own ellipse (outlines touching it)
+                cv2.ellipse(ell, (int(ex - x0), int(ey - y0)), (int(rx), int(ry)), 0, 0, 360, 1, -1)
+                m &= ell
         fill_ = np.pad(m, 1)  # a free border, so everything outside the shape is one region
         ff = np.zeros((fill_.shape[0] + 2, fill_.shape[1] + 2), np.uint8)
         cv2.floodFill(fill_, ff, (0, 0), 1)
@@ -245,6 +253,25 @@ def body_hoodie(c):
     return np.clip(out, 0, 1)
 
 
+def body_portrait(c):
+    """A head-and-shoulders drawing used as is (side views, close-ups): the paper removed, cut at the
+    page's edges (left_edge, bottom) with a soft fade, no arms."""
+    im = photo.flat_light(cv2.imread(f"{ROOT}/{c['src']}"))
+    h, w = im.shape[:2]
+    x0 = c.get("left_edge", 0)
+    seeds = [(x, 5) for x in range(x0 + 5, w, 15)] + [(w - 6, y) for y in range(0, h - 20, 15)] + \
+            [(x0 + 10, y) for y in range(0, h - 20, 15)]
+    alpha = photo.cut_figure(im, seeds, tol=28)
+    X = np.arange(w, dtype=np.float32)[None, :]
+    Y = np.arange(h, dtype=np.float32)[:, None]
+    alpha *= np.clip((X - x0 - 6) / 30, 0, 1)  # the page's left edge: hair fades out
+    alpha *= np.clip((c.get("bottom", h) - 4 - Y) / 3, 0, 1)
+    f = np.dstack([im.astype(np.float32) / 255, alpha])
+    if c.get("dark_eyes"):
+        f = solid_black(f, [tuple(e) for e in c["head"]["eyes"]], convex=c.get("eye_fill") == "convex")
+    return f
+
+
 def sleeve(c, length, r0, r1, joint0, cuff=False, seed=0):
     """One arm part: a sleeve with crayon shading along one side and an ink outline. The upper arm
     is a tapered capsule (its top hides behind the body). The forearm widens a little toward an open,
@@ -288,9 +315,14 @@ def main(name):
     c = load_rig(name)
     out = f"{ROOT}/public/parts/{name}"
     os.makedirs(out, exist_ok=True)
-    b = body_hoodie(c) if c.get("kind") == "hoodie" else body(c)
+    b = {"hoodie": body_hoodie, "portrait": body_portrait}.get(c.get("kind"), body)(c)
     save = lambda p, im: cv2.imwrite(p, np.clip(im * 255 + 0.5, 0, 255).astype(np.uint8))  # noqa: E731
     save(f"{out}/body.png", b)
+    if c.get("kind") == "portrait":  # no arms: head and shoulders only
+        json.dump(dict(credit=c["credit"], pad=c.get("pad", 0), src_h=b.shape[0], head=c["head"], blink=c.get("blink", True)),
+                  open(f"{out}/parts.json", "w"), indent=1)
+        print(out, b.shape)
+        return
     ar = c["arm"]
     r = ar["width"] / 2
     up, S, E = sleeve(c, ar["upper"], r, 0.9 * r, r + 20, seed=40)
