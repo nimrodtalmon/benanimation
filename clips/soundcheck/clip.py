@@ -49,9 +49,8 @@ def ramp(t, a, b):
 
 def cue(t, shot):
     beams = ramp(t, CHORUS - 0.2, CHORUS + 0.6) * (1 - ramp(t, 42.0, 43.5))
-    spot_x = walk_in.x(t) - 60 if shot == "full" else W / 2
-    if shot == "full" and t < 2.2:
-        spot_x = STAND["x"] + 120  # the spot waits on the empty stand
+    # the spot waits on the empty stand; he walks into it and it stays with him
+    spot_x = max(walk_in.x(t) - 60, STAND["x"] + 120) if shot == "full" else W / 2
     return dict(beams=beams, spot=(spot_x, 0.9 * ramp(t, 0.2, 1.8)), house=0.55 + 0.45 * max(ramp(t, 0.0, 2.0) * 0.5, beams))
 
 
