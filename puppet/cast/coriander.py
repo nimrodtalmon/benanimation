@@ -9,7 +9,7 @@ import hand as handrig
 import props
 import warp
 from limb import Limb
-from motion import HeadMotion, Spring, decay_since
+from motion import Face, HeadMotion, Spring, decay_since
 from props import blit, place
 from song import Song
 from warp import over_sub
@@ -40,7 +40,7 @@ def soft_poly(shape, pts, s, sigma):
 
 
 class Guitarist:
-    def __init__(self, song=None, scale=0.78, cx=W / 2, top=None, head=1.0):
+    def __init__(self, song=None, scale=0.78, cx=W / 2, top=None, head=1.0, face=False):
         self.song = song or Song.default()
         cfg = dict(CORI_HEAD, full="public/paint/coriander-full.png", height=2070 * scale)
         self.p = warp.Puppet(cfg)
@@ -111,6 +111,9 @@ class Guitarist:
         self.prev_turn = 0.0
         acc = [(g["t"], 0.9) for g in self.song.data["guitar"] if g["accent"] and (g["t"] % self.song.bar) < 0.08]
         self.motion = HeadMotion(3, acc, self.song.duration, self.song.spb, turn_amp=0.4 * head, tilt_amp=3.0 * head, nod_px=6 * scale * head)
+        gt = self.song.data["guitar"]
+        self.face = Face(self.song, accents=[g["t"] for g in gt if g.get("accent") and (g["t"] % self.song.bar) < 0.05],
+                         hits=[], singalong=0.45, base_smile=0.2, seed=3) if face else None
 
     def fret_geometry(self, t, fpos, org):
         """Where the fretting hand goes: back of the hand to the audience, fingers up and curled into
@@ -156,7 +159,8 @@ class Guitarist:
         on_beat = math.cos(math.pi * ph) ** 2
         turn, tilt, nod, blink, sway = self.motion.at(t)
         sway = sway * 35 * p.s
-        fig = p.head_frame(turn, 0.0, "ah", blink, sway)
+        e = self.face.at(t) if self.face else dict(smile=0.0, brow=0.0, mouth=0.0, squint=0.0)
+        fig = p.head_frame(turn, e["mouth"], "ah", max(blink, e["squint"]), sway, smile=e["smile"], brow=e["brow"])
         # strumming forearm: rotate about the elbow; fretting hand: slide along the neck
         th = 0.0  # (her arms are limbs now)
         ci = max(0, np.searchsorted([c[0] for c in self.chords], t + 0.08) - 1)

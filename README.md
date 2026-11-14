@@ -4,7 +4,7 @@ Animated clips from Ben's hand-drawn characters. Everything is code: scans in, M
 
 ## Warp-puppet band (current direction)
 
-Start with **docs/TOOLKIT.md**: the reusable pipeline, how to add a character, and lessons learned.
+Start with **docs/STATUS.md** (where we are, next steps), then **docs/TOOLKIT.md**: the reusable pipeline, how to add a character, and lessons learned.
 
 
 Everything in Python + OpenCV (`puppet/`), every move timed to the song (`src/song.json` + `public/song/vocals.wav`):

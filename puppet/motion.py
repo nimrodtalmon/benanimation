@@ -330,3 +330,37 @@ class Lean:
     def at(self, velocity, t):
         tgt = max(-self.max, min(self.max, self.k * velocity))
         return math.radians(float(self.s.at(tgt, t)))
+
+
+class Face:
+    """Expressions for a band member who doesn't sing (drummer, guitarist), driven by the song:
+    a smile that grows in the chorus, brows up on accents (crash, accented strum), a squint of
+    effort on strong hits, a mouth that hangs a little open on hits or mouths the words with the
+    singer, and now and then a playful look (brows + smile). All smoothed; returns a dict for
+    Puppet.head_frame (smile, brow, mouth) plus squint (add to blink).
+
+      face = Face(song, accents=[t...], hits=[t...], singalong=0.0, seed=1)"""
+
+    def __init__(self, song, accents=(), hits=(), singalong=0.0, base_smile=0.15, seed=1):
+        self.song = song
+        self.acc, self.hits = np.sort(np.asarray(accents, float)), np.sort(np.asarray(hits, float))
+        self.singalong, self.base = singalong, base_smile
+        self.chorus = [(c["t0"], c["t1"]) for c in song.data.get("sections", []) if c["name"] == "chorus"]
+        rng = np.random.default_rng(seed)
+        self.looks = np.cumsum(rng.uniform(4.0, 8.0, 40))
+        self.sm = Spring(base_smile, 2.5, 1.0)
+        self.env = song.vocal_drivers()[0] if singalong else None
+
+    def at(self, t):
+        ch = any(a - 0.3 <= t < b for a, b in self.chorus)
+        look, _ = decay_since(t, self.looks, 0.9)
+        smile = float(self.sm.at(self.base + (0.55 if ch else 0.0) + 0.4 * look, t))
+        acc, _ = decay_since(t, self.acc, 0.45)
+        hit, _ = decay_since(t, self.hits, 0.12)
+        brow = min(1.0, 0.8 * acc + 0.6 * look)
+        squint = 0.28 * hit * (1.0 if ch else 0.5)
+        mouth = 0.18 * acc + 0.08 * hit
+        if self.env is not None and ch:
+            f = min(int(t * 30), len(self.env) - 1)
+            mouth = max(mouth, self.singalong * float(self.env[f]))
+        return dict(smile=smile, brow=brow, mouth=min(0.6, mouth), squint=squint)

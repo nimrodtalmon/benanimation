@@ -133,12 +133,34 @@ class Puppet:
             self.sprites = {k: (cv2.imread(f"{ROOT}/{cfg['mouths']}/{v['file']}", cv2.IMREAD_UNCHANGED).astype(np.float32) / 255, v)
                             for k, v in info.items()}
 
-    def head_frame(self, turn, mouth, vowel, blink, sway):
+    def expr_weights(self):
+        """Fields for expressions: mouth corners (smile) and the brow area above each eye."""
+        if hasattr(self, "_ew"):
+            return self._ew
+        X, Y = self.X, self.Y
+        mx, my, mw, J = self.mouth
+        sg = 0.45 * mw
+        cl = np.exp(-(((X - (mx - 0.75 * mw)) ** 2 + (Y - my) ** 2) / (2 * sg * sg)))
+        cr = np.exp(-(((X - (mx + 0.75 * mw)) ** 2 + (Y - my) ** 2) / (2 * sg * sg)))
+        br = np.zeros_like(X)
+        for ex, ey, erx, ery in self.eyes:
+            sb = 0.9 * erx
+            br = np.maximum(br, np.exp(-(((X - ex) ** 2) / (2 * sb * sb) + ((Y - (ey - 1.6 * ery)) ** 2) / (2 * (1.1 * ery) ** 2))))
+        self._ew = (cl.astype(np.float32), cr.astype(np.float32), br.astype(np.float32))
+        return self._ew
+
+    def head_frame(self, turn, mouth, vowel, blink, sway, smile=0.0, brow=0.0):
+        """smile: -1 (corners down) .. 1 (corners up and out); brow: 0..1 (brows raised)."""
         mx, my, mw, J = self.mouth
         width = {"ee": 1.15, "ah": 1.0, "oh": 0.75, "oo": 0.55}.get(vowel, 1.0)
         drop = J * mouth * (0.55 if vowel == "ee" else 1.0)
         dx = turn * self.c["turn_px"] * self.s * 2 * (self.w_turn - 0.25 * self.w_out) + sway * self.w_hair
         dy = drop * self.w_jaw - 0.12 * drop * self.w_lip
+        if smile or brow:
+            cl, cr, br = self.expr_weights()
+            fr = self.face[3]  # face radius (vertical): expressions scale with the face, not the mouth
+            dy = dy - smile * 0.05 * fr * (cl + cr) - brow * 0.11 * fr * br
+            dx = dx + smile * 0.025 * fr * (cr - cl)
         dx = dx + (width - 1) * 0.0  # width handled by the interior shape
         img = cv2.remap(self.head, self.X - dx, self.Y - dy, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
         mxt = mx + turn * self.c["turn_px"] * self.s * 2

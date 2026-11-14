@@ -10,7 +10,7 @@ import hand as handrig
 import props
 import warp
 from limb import Limb
-from motion import HeadMotion, decay_since
+from motion import Face, HeadMotion, decay_since
 from props import blit, place
 from song import Song
 from warp import load_rgba, over_sub
@@ -30,7 +30,7 @@ DRUM = dict(KICK=36, SNARE=38, HAT=42, OPEN_HAT=46, CRASH=49, TOM_HI=50, TOM_MID
 class Drummer:
     PARTS = f"{ROOT}/public/parts/pepper"
 
-    def __init__(self, song=None, scale=0.6, cx=W / 2, top=20, empty=False, head=1.0):
+    def __init__(self, song=None, scale=0.6, cx=W / 2, top=20, empty=False, head=1.0, face=False):
         """empty=True: only the kit (before she sits down)."""
         self.song = song or Song.default()
         self.empty = empty
@@ -91,6 +91,9 @@ class Drummer:
         self.prev_fore = {}
         acc = [(d["t"], 0.5 + 0.5 * d["vel"] / 127) for d in self.song.data["drums"] if d["piece"] in (38, 49) and (d["t"] % self.song.bar) < 0.05 + self.song.bar / 2]
         self.motion = HeadMotion(7, acc, self.song.duration, self.song.spb, turn_amp=0.35 * head, tilt_amp=2.5 * head, nod_px=7 * scale * head)
+        dr = self.song.data["drums"]
+        self.face = Face(self.song, accents=[d["t"] for d in dr if d["piece"] == 49],
+                         hits=[d["t"] for d in dr if d["piece"] == 38 and d["vel"] >= 100], base_smile=0.1, seed=7) if face else None
 
     def strike_point(self, what, side):
         img, anc = self.kit[what][0]
@@ -144,7 +147,8 @@ class Drummer:
         # head: nods on the snare, glances a little toward the busy hand
         turn, tilt, nod, blink, sway = self.motion.at(t)
         sway = sway * 35 * p.s
-        fig = p.head_frame(turn, 0.0, "ah", blink, sway)
+        e = self.face.at(t) if self.face else dict(smile=0.0, brow=0.0, mouth=0.0, squint=0.0)
+        fig = p.head_frame(turn, e["mouth"], "oh", max(blink, e["squint"]), sway, smile=e["smile"], brow=e["brow"])
         th = math.radians(tilt) * p.w_bend
         px, py = p.pivot
         ox, oy = p.X - px, p.Y - py

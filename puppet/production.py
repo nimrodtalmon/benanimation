@@ -27,9 +27,9 @@ def stage_light(frame, t):
     return frame
 
 
-def finish(frame, t, f, n, rng, credit, zoom=(1.0, 1.06), focus=(W / 2, H * 0.42), vignette=0.45):
+def finish(frame, t, f, n, rng, credit, zoom=(1.0, 1.06), focus=(W / 2, H * 0.42), vignette=0.45, roll=0.0):
     z = zoom[0] + (zoom[1] - zoom[0]) * f / max(1, n - 1)
-    C = cv2.getRotationMatrix2D((focus[0] + 8 * math.sin(t * 0.8), focus[1]), 0, z)
+    C = cv2.getRotationMatrix2D((focus[0] + 8 * math.sin(t * 0.8), focus[1]), roll, z)
     C[0, 2] += W / 2 - focus[0]  # the focus point is brought to the frame center (a pan)
     C[1, 2] += H * 0.42 - focus[1]
     frame = cv2.warpAffine(frame, C, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
@@ -180,11 +180,22 @@ class TVStatic:
     """Recorded-TV static multiplied in (Del the ghost in Clint Eastwood): fine noise in horizontal
     streaks and a slow rolling band, re-drawn every frame."""
 
-    def __init__(self, amount=0.10, seed=0):
-        self.amount = amount
+    def __init__(self, amount=0.10, seed=0, vhs=0.0):
+        """vhs (0..1): also color bleed (red and blue shifted sideways), scan lines and a rare
+        horizontal tear, like a worn tape."""
+        self.amount, self.vhs = amount, vhs
         self.rng = np.random.default_rng(seed)
 
     def __call__(self, frame, f):
+        if self.vhs > 0:
+            sh = max(1, int(round(4 * self.vhs)))
+            frame = frame.copy()
+            frame[:, sh:, 2] = frame[:, :-sh, 2]  # red to the right
+            frame[:, :-sh, 0] = frame[:, sh:, 0]  # blue to the left
+            frame[1::3] *= 1 - 0.10 * self.vhs  # scan lines
+            if self.rng.uniform() < 0.04 * self.vhs:  # a tear: a band of rows slides sideways
+                y = int(self.rng.uniform(0, H - 40))
+                frame[y:y + 30] = np.roll(frame[y:y + 30], int(self.rng.uniform(8, 30)), axis=1)
         n = self.rng.normal(0, 1, (H // 2, W // 8)).astype(np.float32)
         n = cv2.resize(n, (W, H), interpolation=cv2.INTER_LINEAR)  # streaky: stretched sideways
         y = np.arange(H, dtype=np.float32)
@@ -241,7 +252,7 @@ class HandDrawn:
 
 class Production:
     def __init__(self, song, cast, shots, name, crowd_in=(), zoom_wide=(1.04, 1.0), zoom=(1.0, 1.05), script=None, cue=None,
-                 look=None, twos=False, crowd_wide=True, drift=0.0, parallax=None, ghost=0.0, stage="stage"):
+                 look=None, twos=False, crowd_wide=True, drift=0.0, parallax=None, ghost=0.0, stage="stage", punch=None, roll=0.0):
         """look: a HandDrawn finish (or None); twos: characters move on twos (15 drawings a second,
         the camera and lights stay smooth), the cadence of hand-drawn 2D."""
         self.song, self.cast_f, self.shots, self.name = song, cast, shots, name
@@ -256,6 +267,9 @@ class Production:
         # floor blends to 1.0); ghost = frame blending on fast motion (a trail of the previous frame)
         self.drift, self.parallax, self.ghost = drift, parallax, ghost
         self._prev = None
+        # punch = (times, amount): a quick zoom-in kick on accents (e.g. crash hits), easing back;
+        # roll = degrees of slow camera roll (a hand-held / swaying camera)
+        self.punch, self.roll = punch, roll
         self.cast = {}
         self.stage = Stage(song, stage)
 
@@ -291,6 +305,13 @@ class Production:
             focus = (focus[0] + (k - 0.5) * drift * W * (1 if i % 2 == 0 else -1), focus[1])
             zoom = (zoom[0] + drift, zoom[1] + drift)  # room for the move
         z = zoom[0] + (zoom[1] - zoom[0]) * k
+        if self.punch is not None:
+            times, amt = self.punch
+            i = np.searchsorted(times, t, side="right") - 1
+            if i >= 0 and times[i] >= a:  # only accents inside this shot
+                u = t - times[i]
+                z *= 1 + amt * (min(1.0, u / 0.06) if u < 0.06 else math.exp(-(u - 0.06) / 0.35))
+        roll = self.roll * math.sin(2 * math.pi * t / 7.0) if self.roll else 0.0
         if self.parallax is not None:
             frame = self.parallax_bg(frame, z, (focus[0] + 8 * math.sin(t * 0.8), focus[1]))
         who = self.who(shot)
@@ -308,7 +329,7 @@ class Production:
         if self.look is not None:
             frame = self.look(frame, f)
         credit = list(dict.fromkeys([w.j["credit"] for w in who])) + [self.song.credit]
-        return finish(frame, t, 0, 1, rng, credit, zoom=(z, z), focus=focus, vignette=0.45 if self.stage.dark else 0.12)
+        return finish(frame, t, 0, 1, rng, credit, zoom=(z, z), focus=focus, vignette=0.45 if self.stage.dark else 0.12, roll=roll)
 
     def parallax_bg(self, frame, z, fc):
         """Pre-warp the stage so that, after the camera (zoom z about focus fc), the back wall moves

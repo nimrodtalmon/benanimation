@@ -145,3 +145,10 @@ timing from `song` (never from a global), so it works in any clip with any song.
   with the song. `Production(drift=lambda t: ...)` takes a per-shot function for such a "ladder".
 - Looks: `Stage(style="white"|"night")`, `TVStatic`, `Looks(a, b)` to chain finishes; `clips/stylereel` renders
   the same 10 s of the band in several styles for choosing.
+
+### Faces for players who don't sing (round 2)
+- `Puppet.head_frame(..., smile=, brow=)`: smile lifts the mouth corners, brow raises the area above the eyes; amplitudes scale
+  with the face radius. `motion.Face(song, accents, hits, singalong)`: smile grows in the chorus, brows up on accents, a squint
+  on strong hits, the mouth hangs open on hits or mouths the words. `Drummer(face=True)`, `Guitarist(face=True)`.
+- Camera: `Production(punch=(times, amount), roll=deg)` (zoom kick on accents, slow sway). `TVStatic(vhs=...)` adds color
+  bleed, scan lines, rare tears.
