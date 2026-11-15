@@ -153,7 +153,7 @@ class CloseUp:
         self.ensure()
         i = int(np.clip(round((t - self.job["t0"]) * FPS), 0, self.meta["n"] - 1))
         if i not in self.frames:
-            if len(self.frames) > 40:
+            if len(self.frames) > 6:  # keep memory small: each frame is a full float image
                 self.frames.clear()
             im = cv2.imread(f"{self.d}/f_{i:04d}.png", cv2.IMREAD_UNCHANGED)
             self.frames[i] = im.astype(np.float32) / (65535.0 if im.dtype == np.uint16 else 255.0)
