@@ -124,7 +124,8 @@
   "strap_back": [
    200,
    1150
-  ]
+  ],
+  "model": "pbass_blue"
  },
  "blink": true
 }

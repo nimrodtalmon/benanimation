@@ -42,7 +42,7 @@ class Drummer:
         self.top = top
         self.rig(scale, cx, top)
         from groove import Groove
-        self.groove = Groove(self.song, seed=11, amount=groove, sway=0.0, lean=0.0, step=7.0, bounce=3.0, nod=12.0) if groove else None
+        self.groove = Groove(self.song, seed=11, amount=groove, sway=0.0, lean=0.0, step=7.0, bounce=3.0, nod=12.0, style="mix") if groove else None
         # the kit is laid out in kit units around Pepper's shoulders (403, 650); rig() says where
         # that point is on screen for this player
         ax, ay = self.kit_anchor
@@ -101,6 +101,9 @@ class Drummer:
         dr = self.song.data["drums"]
         self.face = Face(self.song, accents=[d["t"] for d in dr if d["piece"] == 49],
                          hits=[d["t"] for d in dr if d["piece"] == 38 and d["vel"] >= 100], base_smile=0.1, seed=7) if face else None
+        if self.face:  # smoothed over the song: expressions ease in and out (no tics)
+            from motion import Smoothed
+            self.expr = Smoothed(lambda t_: dict(self.face.at(t_), squint=0.4 * self.face.at(t_)['squint']), self.song.duration, dict(mouth=0.06, brow=0.14, smile=0.35, squint=0.12))
 
     def rig(self, scale, cx, top):
         """The player: head/body puppet, arms, hands and where they sit. Sets p, cfg, j, sp (sprite
@@ -161,7 +164,9 @@ class Drummer:
         crash, _ = decay_since(t, self.times["crash"], 0.7)
         last = self.times["crash"][self.times["crash"] <= t]
         wob = 9.0 * crash * math.sin(2 * math.pi * 3.2 * (t - last[-1])) if len(last) and crash else 0.0
-        self.k3.draw(frame, self.P, s, "crash", wob)
+        self._wob = wob
+        if "crash" not in self.k3.meta.get("front", []):
+            self.k3.draw(frame, self.P, s, "crash", wob)
         hat, _ = decay_since(t, self.times["hat"], 0.15)
         opened = decay_since(t, self.times["open"], 0.35)[0]
         self.k3.draw(frame, self.P, s, "hat", 1.0 * opened - 0.3 * hat)
@@ -223,7 +228,7 @@ class Drummer:
         sway = sway * 35 * p.s
         gv = self.groove.at(t) if self.groove else dict(dx=0.0, dy=0.0, nod=0.0)
         nod = nod + gv["nod"] * s / 0.6
-        e = self.face.at(t) if self.face else dict(smile=0.0, brow=0.0, mouth=0.0, squint=0.0)
+        e = self.expr.at(t) if self.face else dict(smile=0.0, brow=0.0, mouth=0.0, squint=0.0)
         fig = p.head_frame(turn, e["mouth"], "oh", max(blink, e["squint"]), sway, **self.head_args(e))
         th = math.radians(tilt) * p.w_bend
         px, py = p.pivot
@@ -342,5 +347,9 @@ class Drummer:
             lay, (x, y) = self.arms[side].render(S, E, Wr, sp, (W, H), part="fore")
             if lay is not None:
                 warp.over(frame, lay, x, y)
+        if self.k3 is not None:  # cymbals in front of the drummer go over his arms and hands
+            for what in self.k3.meta.get("front", []):
+                if what in self.k3.meta["layers"]:
+                    self.k3.draw(frame, self.P, self.s, what, getattr(self, "_wob", 0.0))
 
 

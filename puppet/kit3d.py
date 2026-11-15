@@ -410,7 +410,7 @@ def build(name, samples=96):
         else:
             top = Vector((0, 0, 0.0))
             r = p["diameter"] / 2 * M
-            spots = {"crash": {"l": (-0.25 * r, 0.8 * r), "r": (-0.15 * r, 0.75 * r)},
+            spots = {"crash": {"l": (-0.25 * r, 0.97 * r), "r": (-0.15 * r, 0.97 * r)},  # its far edge (the drummer hits it from behind)
                      "ride": {"l": (-0.2 * r, 0.6 * r), "r": (0.2 * r, 0.6 * r)},
                      "hihat": {"l": (-0.3 * r, 0.6 * r), "r": (0.25 * r, 0.62 * r)}}[t]
         pieces[key] = dict(center=U(mw @ top), strike={s_: U(mw @ (top + Vector((dx, dy, 0)))) for s_, (dx, dy) in spots.items()})
@@ -469,7 +469,7 @@ def build(name, samples=96):
         g.location, g.rotation_euler = base_loc, base_rot
         for o in objs:
             o.hide_render = True
-    meta = dict(name=name, size=[W_, H_], origin=[x0, y0], units_per_px=k, pieces=pieces, layers=layers,
+    meta = dict(name=name, size=[W_, H_], front=spec.get("front", []), origin=[x0, y0], units_per_px=k, pieces=pieces, layers=layers,
                 floor=U(Vector((0, 0.3, 0))))
     json.dump(meta, open(f"{out}/meta.json", "w"), indent=1)
     print("kit built:", out)

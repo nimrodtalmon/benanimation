@@ -42,6 +42,7 @@ class Groove:
         d = song.data
         self.beats = np.array(d.get("beats") or np.arange(0, song.duration, song.spb))
         self.holes = [tuple(h) for h in d.get("holes", [])]
+        self.peaks = [tuple(h) for h in d.get("peaks", [])]  # the biggest parts (choruses): all-out moves
         n = int(song.duration * FPS) + 2
         # energy: drum hits per second, smoothed over ~1.5 s, normalized; the bass alone gives a little
         hits = np.zeros(n)
@@ -125,6 +126,33 @@ class Groove:
         dx = 4.0 * tri(t / 17.0 + p[2] / 6.3)
         return dict(rot=0.0, dx=float(self.amount * dx), dy=0.0, nod=0.0, turn=float(self.amount * turn), tilt=float(self.amount * tilt), energy=self.e(t), hole=False)
 
+    def peak(self, t, ramp=0.35):
+        """How much of the all-out peak moves to use now (0..1, eased in and out at the edges)."""
+        w = 0.0
+        for a, b in self.peaks:
+            w = max(w, min(1.0, max(0.0, (t - a + 0.1) / ramp)) * min(1.0, max(0.0, (b - t) / ramp)))
+        return 0.5 - 0.5 * math.cos(math.pi * w)
+
+    def bang(self, t):
+        """All-out head-banging: on every beat the head snaps down (fast) and comes back up
+        (slower); harder on the bar's first beat. -> (bang 0..1, bar-start dip 0..1)."""
+        j = np.searchsorted(self.beats, t, side="right")
+        bang, dip = 0.0, 0.0
+        for b in self.beats[max(0, j - 2):j]:
+            u = t - b
+            idx = int(np.searchsorted(self.beats, b))
+            down = 1.0 if idx % 4 == 0 else 0.8
+            # the head is down on the beat: falls in the 0.12 s before it, rises over 0.3 s after
+            bang = max(bang, down * math.exp(-u / 0.16))
+            if idx % 4 == 0:
+                dip = max(dip, math.exp(-u / 0.25))
+        if j < len(self.beats):
+            u = self.beats[j] - t
+            if u < 0.12:
+                idx = j
+                bang = max(bang, (1.0 if idx % 4 == 0 else 0.8) * (1 - u / 0.12) ** 2)
+        return bang, dip
+
     def at_mix(self, t):
         """Calm (Clint Eastwood drift) when the band is quiet; when it plays hard, the head bangs on
         the beat (bar starts harder) and the body rocks a little, more in loud passages."""
@@ -136,6 +164,21 @@ class Groove:
             self.style = "mix"
         e = r["energy"]
         w = min(1.0, max(0.0, (e - 0.45) / 0.35))  # how much of the rock moves to use now
+        pk = self.peak(t) * (0.0 if r["hole"] else 1.0)
+        if pk > 0:
+            bang, dip = self.bang(t)
+            bar = self.song.bar
+            rot = 4.5 * math.sin(2 * math.pi * t / (2 * bar) + self.phase[0]) + 1.5 * bang
+            out = dict(rot=rot, dx=16 * math.sin(2 * math.pi * t / (2 * bar) + self.phase[1]), dy=12 * bang + 8 * dip,
+                       nod=38 * bang, turn=0.15 * math.sin(2 * math.pi * t / (4 * bar) + self.phase[2]), tilt=3 * math.sin(2 * math.pi * t / bar))
+            base = self.at_mix_calm(t, r, ce, w)
+            m = {k: base[k] * (1 - pk) + out[k] * pk * self.amount for k in out}
+            m.update(energy=e, hole=r["hole"], bang=pk * bang)
+            return m
+        return self.at_mix_calm(t, r, ce, w)
+
+    def at_mix_calm(self, t, r, ce, w):
+        e = r["energy"]
         return dict(rot=0.6 * r["rot"] * w + (r["rot"] if r["hole"] else 0.0) * (1 - w), dx=ce["dx"] + 0.4 * r["dx"] * w,
                     dy=0.7 * r["dy"] * w, nod=1.1 * r["nod"] * w + (r["nod"] if r["hole"] else 0.0) * (1 - w),
-                    turn=ce["turn"] * (1 - 0.5 * w), tilt=ce["tilt"], energy=e, hole=r["hole"])
+                    turn=ce["turn"] * (1 - 0.5 * w), tilt=ce["tilt"], energy=e, hole=r["hole"], bang=0.0)

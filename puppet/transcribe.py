@@ -191,6 +191,44 @@ def vocal(y):
     return out
 
 
+def peaks(y, beats, rel=0.97, jump=0.15, min_bars=4, max_share=0.5):
+    """The song's biggest parts (choruses, for an instrumental the loudest stretches): bars grouped
+    into sections where the loudness jumps by more than `jump`; sections of at least min_bars whose
+    loudness is within `rel` of the loudest section; at most max_share of the song (the loudest
+    first) -> [[t0, t1]]."""
+    e = env(y)
+    bars = list(beats[::4]) + [len(y) / SR]
+    if len(bars) < 3:
+        return []
+    lv = []
+    for a, b in zip(bars[:-1], bars[1:]):
+        i0, i1 = int(a * SR / HOP), max(int(a * SR / HOP) + 1, int(b * SR / HOP))
+        lv.append(float(e[i0:i1].mean()))
+    secs, cur = [], [0]
+    for i in range(1, len(lv)):
+        m = np.mean([lv[j] for j in cur])
+        if abs(lv[i] - m) > jump * m:
+            secs.append(cur)
+            cur = [i]
+        else:
+            cur.append(i)
+    secs.append(cur)
+    sm = [(np.mean([lv[j] for j in sc]), sc) for sc in secs if len(sc) >= min_bars]
+    if not sm:
+        return []
+    top = max(m for m, _ in sm)
+    out, total = [], 0.0
+    for m, sc in sorted(sm, key=lambda x: -x[0]):
+        if m < rel * top:
+            break
+        a, b = bars[sc[0]], bars[sc[-1] + 1]
+        if total + (b - a) > max_share * bars[-1] and out:
+            break
+        out.append([round(float(a), 3), round(float(b), 3)])
+        total += b - a
+    return sorted(out)
+
+
 def holes(y, min_len=0.3, level=0.15):
     """Moments where the whole band stops (stop-time breaks): the mix level under `level` of its
     loud level for at least min_len seconds -> [[t0, t1]]."""
@@ -232,6 +270,7 @@ def transcribe(mix, stems, credit=""):
         root = librosa.note_to_midi(n.rstrip("m5") + "2")
         guitar.append(dict(t=round(g["t"], 3), dur=g["dur"], root=int(root), chord=n, dir="down" if down else "up", accent=g["vel"] > 100))
     return dict(bpm=round(bpm, 2), duration=round(duration, 3), beats=[round(float(b), 3) for b in bt], holes=holes(y),
+                peaks=peaks(y, [float(b) for b in bt]),
                 sections=sections(y, 4 * spb, duration, float(bt[0]) if len(bt) else 0.0), credit=credit,
                 drums=[dict(beat=None, piece=d["piece"], vel=d["vel"], t=round(d["t"], 3)) for d in dr],
                 bass=[dict(t=round(b["t"], 3), dur=b["dur"], pitch=b["pitch"], vel=b["vel"]) for b in bass],

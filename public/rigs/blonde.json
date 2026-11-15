@@ -128,7 +128,8 @@
   "strap_back": [
    520,
    1700
-  ]
+  ],
+  "model": "lp_cherry"
  },
  "blink": false
 }

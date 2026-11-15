@@ -17,7 +17,7 @@ import props
 import warp
 import rig
 from groove import Groove
-from motion import Face, HeadMotion, Spring, decay_since
+from motion import Face, HeadMotion, Smoothed, Spring, decay_since
 from props import blit, place
 from warp import over_sub
 
@@ -55,8 +55,13 @@ class BustPlayer:
         self.pick_hand = handrig.Hand(st, mirror=False)
         self.fret_hand = handrig.Hand(st, mirror=True)
         self.hsize = hs["length"] * scale
-        kind = GUITAR if self.inst == "guitar" else BASS
-        self.g, self.ga = props.guitar(b["Lb"] * scale, **kind)
+        if b.get("model"):  # a rendered 3D instrument (public/instruments/<model>.json, puppet/guitar3d.py)
+            from guitar3d import Guitar3D
+            self.g, self.ga = Guitar3D(b["model"]).at(b["Lb"] * scale)
+        else:
+            kind = GUITAR if self.inst == "guitar" else BASS
+            self.g, self.ga = props.guitar(b["Lb"] * scale, **kind)
+        self.Lbody = self.ga.get("Lb", self.ga["neck_len"] / 1.55)
         self.g_angle = math.radians(b["angle"])
         # strokes from the score: guitar strums (down/up), bass plucks (alternating fingers)
         if self.inst == "guitar":
@@ -76,13 +81,22 @@ class BustPlayer:
         acc = [(t, 0.9) for t, _, a in ev if a > 0.9 and (t % song.bar) < 0.08]
         self.groove = Groove(song, seed=seed, amount=groove, style=style) if groove else None
         crashes = [d["t"] for d in song.data.get("drums", []) if d["piece"] == 49]
-        self.face = Face(song, accents=crashes, hits=list(self.hit_t), base_smile=0.05, seed=seed) if face else None
+        self.face = Face(song, accents=crashes, hits=[], base_smile=0.05, seed=seed) if face else None  # no squint per strum (read as tics)
         self.shouts = np.sort(np.asarray(shouts, float))
         self.blinks = j.get("blink", True)  # drawn eye sockets don't blink
         self.sings, self.mic_side = sings, mic_side
         if sings:
             self.voice = song.vocal_drivers()
+        if self.face is not None:  # the expression over the whole song, smoothed (no jumps)
+            self.expr = Smoothed(self.raw_expr, song.duration, dict(mouth=0.07, brow=0.14, smile=0.35, squint=0.12))
         self.motion = HeadMotion(seed, acc, song.duration, song.spb, turn_amp=0.4 * head, tilt_amp=3.0 * head, nod_px=8 * scale / 0.5 * head)
+
+    def raw_expr(self, t):
+        e = self.face.at(t)
+        en = self.groove.at(t).get("energy", 0.5) if self.groove else 0.5
+        shout, _ = decay_since(t, self.shouts, 0.45) if len(self.shouts) else (0.0, 0)
+        return dict(mouth=min(0.85, e["mouth"] + 0.75 * shout), smile=min(1.0, e["smile"] + 0.4 * en - 0.3 * shout),
+                    brow=min(1.0, 0.7 * e["brow"] + 0.6 * shout), squint=0.2 * e["squint"] + 0.25 * shout)
 
     def credit(self):
         return self.j["credit"]
@@ -118,12 +132,8 @@ class BustPlayer:
             turn, tilt, nod, sway = gv0["turn"], gv0["tilt"], 0.0, 0.0
         mouth, smile, brow, squint = 0.0, 0.0, 0.0, 0.0
         if self.face is not None:
-            e = self.face.at(t)
-            en = gv0.get("energy", 0.5) if gv0 else 0.5
-            shout, _ = decay_since(t, self.shouts, 0.45) if len(self.shouts) else (0.0, 0)
-            mouth = min(0.85, e["mouth"] + 0.75 * shout)
-            smile = min(1.0, e["smile"] + 0.45 * en - 0.3 * shout)
-            brow, squint = min(1.0, e["brow"] + 0.6 * shout), e["squint"] + 0.25 * shout
+            e = self.expr.at(t)
+            mouth, smile, brow, squint = e["mouth"], e["smile"], e["brow"], e["squint"]
         vowel = "ah"
         if self.sings:  # the lead voice: mouth shapes on twos, from the vocal track
             env, vowels, _ = self.voice
@@ -134,11 +144,12 @@ class BustPlayer:
         gv = gv0 if gv0 else dict(rot=0.0, dx=0.0, dy=0.0, nod=0.0)
         u = s / 0.5  # groove units are px at scale 0.5
         nod = nod + gv["nod"] * u
+        pitch = 0.16 * gv.get("bang", 0.0)  # head-banging: the head tips forward, the face shortens
         thh = math.radians(tilt) * p.w_bend
         hx, hy = p.pivot
         ox, oy = p.X - hx, p.Y - hy
         c, sn = np.cos(thh), np.sin(thh)
-        fig = cv2.remap(fig, (hx + c * ox + sn * oy).astype(np.float32), (hy - sn * ox + c * oy - nod * p.w_bend).astype(np.float32),
+        fig = cv2.remap(fig, (hx + c * ox + sn * oy).astype(np.float32), (hy - sn * ox + c * oy / (1 - pitch * p.w_bend) - nod * p.w_bend).astype(np.float32),
                         cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
         pump = decay_since(t, self.hit_t, 0.25)[0]
         held = "turn" in gv0
@@ -164,8 +175,9 @@ class BustPlayer:
         M = place(gimg, self.ga["strum"], strum_at, g_angle, 1.0)
         Lb = (self.ga["neck"][0] - self.ga["bridge"][0]) / 0.67
         gx, gy = self.ga["neck"][0] - Lb, self.ga["neck"][1]
-        butt = M @ np.array([gx + 0.01 * Lb, gy, 1])
-        horn = M @ np.array([gx + 0.86 * Lb, gy - 0.33 * Lb, 1])
+        butt_p, horn_p = self.ga.get("butt", (gx + 0.01 * Lb, gy)), self.ga.get("horn", (gx + 0.86 * Lb, gy - 0.33 * Lb))
+        butt = M @ np.array([butt_p[0], butt_p[1], 1])
+        horn = M @ np.array([horn_p[0], horn_p[1], 1])
         sw = 34 * s
         # arms first (poses only): the fretting hand on the neck, the picking hand at the strings.
         # The forearm's open cuff ends a little inside the hand (sink), so the hand comes out of it.
@@ -196,7 +208,7 @@ class BustPlayer:
         Er, Wrr = Lr.solve(Sr, tgt_r, s)
         fret_at = at + (Wrr - tgt_r)
         sp = self.stroke_pos(t)
-        tip = M @ np.array([self.ga["strum"][0] - 0.06 * self.ga["neck_len"] / 1.55, self.ga["strum"][1] + 0.05 * self.ga["neck_len"] * sp / 1.55, 1])
+        tip = M @ np.array([self.ga["strum"][0] - 0.06 * self.Lbody, self.ga["strum"][1] + 0.05 * self.Lbody * sp, 1])
         Rs = handrig.orient(-25 + 8 * sp + math.degrees(g_angle) + 18, -15, 0)
         pick = np.array([0.20, 0.52, -0.10])
         held = [dict(p0=pick, p1=pick + [0.05, 0.05, 0], r0=0.045, r1=0.02, color=(0.25, 0.25, 0.85), gloss=0.5)] if self.inst == "guitar" else []

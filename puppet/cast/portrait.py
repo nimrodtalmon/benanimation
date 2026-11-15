@@ -12,7 +12,7 @@ import numpy as np
 import rig
 import warp
 from groove import Groove
-from motion import Face, decay_since
+from motion import Face, Smoothed, decay_since
 
 W, H = warp.W, warp.H
 
@@ -36,6 +36,13 @@ class Portrait:
         self.blinks = j.get("blink", True)
         self.sings = sings
         self.voice = song.vocal_drivers() if sings else None
+        self.expr = Smoothed(self.raw_expr, song.duration, dict(mouth=0.07, brow=0.14, smile=0.35, squint=0.12))
+
+    def raw_expr(self, t):
+        g, e = self.groove.at(t), self.face.at(t)
+        shout, _ = decay_since(t, self.shouts, 0.45) if len(self.shouts) else (0.0, 0)
+        return dict(mouth=min(0.85, e["mouth"] + 0.75 * shout), smile=min(1.0, e["smile"] + 0.45 * g["energy"] - 0.3 * shout),
+                    brow=min(1.0, 0.7 * e["brow"] + 0.6 * shout), squint=0.2 * e["squint"] + 0.25 * shout)
 
     def credit(self):
         return self.j["credit"]
@@ -43,22 +50,20 @@ class Portrait:
     def draw(self, frame, t):
         p, s = self.p, self.s
         g = self.groove.at(t)
-        turn, tilt, nod = g.get("turn", 0.0), g.get("tilt", 0.0), g["nod"] * s / 0.5
-        e = self.face.at(t)
-        shout, _ = decay_since(t, self.shouts, 0.45) if len(self.shouts) else (0.0, 0)
-        mouth, vowel = min(0.85, e["mouth"] + 0.75 * shout), "ah"
-        smile = min(1.0, e["smile"] + 0.45 * g["energy"] - 0.3 * shout)
+        turn, tilt, nod = g.get("turn", 0.0), g.get("tilt", 0.0), g["nod"] * s / 0.5 * 0.5  # close-ups: half the head-banging
+        pitch = 0.09 * g.get("bang", 0.0)
+        e = self.expr.at(t)
+        mouth, vowel, smile = e["mouth"], "ah", e["smile"]
         if self.sings:
             env, vowels, _ = self.voice
             fi = min(len(env) - 1, (int(t * 30) // 2) * 2)
             if env[fi] > 0.02:
                 mouth, vowel, smile = max(mouth, 0.9 * float(env[fi])), vowels[fi], smile * 0.4
-        fig = p.head_frame(turn, mouth, vowel, min(1.0, e["squint"] + 0.25 * shout) if self.blinks else 0.0, 0.0,
-                           smile=smile, brow=min(1.0, e["brow"] + 0.6 * shout))
+        fig = p.head_frame(turn, mouth, vowel, min(1.0, e["squint"]) if self.blinks else 0.0, 0.0, smile=smile, brow=e["brow"])
         th = math.radians(tilt) * p.w_bend
         hx, hy = p.pivot
         ox, oy = p.X - hx, p.Y - hy
         c, sn = np.cos(th), np.sin(th)
-        fig = cv2.remap(fig, (hx + c * ox + sn * oy).astype(np.float32), (hy - sn * ox + c * oy - nod * p.w_bend).astype(np.float32),
+        fig = cv2.remap(fig, (hx + c * ox + sn * oy).astype(np.float32), (hy - sn * ox + c * oy / (1 - pitch * p.w_bend) - nod * p.w_bend).astype(np.float32),
                         cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
         warp.over(frame, fig, int(round(self.x0 + g["dx"] * s / 0.5)), int(round(self.top + g["dy"] * s / 0.5)))

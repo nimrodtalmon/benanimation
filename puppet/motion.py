@@ -364,3 +364,32 @@ class Face:
             f = min(int(t * 30), len(self.env) - 1)
             mouth = max(mouth, self.singalong * float(self.env[f]))
         return dict(smile=smile, brow=brow, mouth=min(0.6, mouth), squint=squint)
+
+
+class Smoothed:
+    """A function of time (-> dict of numbers) sampled over the whole song and smoothed per key
+    with a Gaussian (sigma in seconds): expressions ease in and out, start a little ahead of the
+    event (anticipation) instead of jumping on it, and any frame can still be rendered on its own.
+
+      expr = Smoothed(raw, duration, dict(brow=0.15, mouth=0.06), default=0.12)
+      expr.at(t) -> dict"""
+
+    def __init__(self, fn, duration, sigmas=None, default=0.12, fps=30):
+        import cv2
+        self.fps = fps
+        n = int(duration * fps) + 2
+        rows = [fn(i / fps) for i in range(n)]
+        self.keys = list(rows[0].keys())
+        self.v = {}
+        for k in self.keys:
+            a = np.array([float(r[k]) for r in rows], np.float32)
+            sg = (sigmas or {}).get(k, default) * fps
+            if sg > 0.3:
+                a = cv2.GaussianBlur(a[None, :], (0, 0), sigmaX=sg, sigmaY=0.01, borderType=cv2.BORDER_REPLICATE)[0]
+            self.v[k] = a
+
+    def at(self, t):
+        x = max(0.0, t * self.fps)
+        i = min(int(x), len(self.v[self.keys[0]]) - 2)
+        u = min(1.0, x - i)
+        return {k: float(a[i] * (1 - u) + a[i + 1] * u) for k, a in self.v.items()}

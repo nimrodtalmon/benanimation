@@ -61,6 +61,18 @@ Read this first in a new session, then `docs/TOOLKIT.md` (pipeline + lessons).
 - Layout lessons: the snare must sit near the middle (the near hand must reach it) and not behind a rack tom (a hit
   there reads as a tom hit) -> a 4-piece rock kit (one rack tom). Pieces a kit lacks fall back to the nearest one.
 
+## Round 8 (Nov 15)
+- Kit: crash and ride moved toward the camera; cymbals listed in the kit's "front" are drawn over the drummer's arms
+  (he hits the crash's far edge from behind).
+- `puppet/guitar3d.py`: guitars and basses rendered in Blender from `public/instruments/<name>.json` (outline, scale
+  length, pickups, knobs, finish); strings stay 2D (they ring). A rig's "play" names its "model"; no model = the old
+  drawn guitar. lp_cherry (single-cut, cherry sunburst), pbass_blue (P-bass style, blue burst, maple neck).
+- Faces: `motion.Smoothed` = an expression curve over the whole song, Gaussian-smoothed per key (eases in and out,
+  anticipates events); no squint per strum. Used by BustPlayer, Portrait, Drummer.
+- Peaks: `transcribe.peaks` finds the song's biggest sections (loudness plateaus within 3% of the loudest, at most half
+  the song) -> score "peaks"; Groove style "mix" goes all-out there: head-banging on every beat (snap down, tip
+  forward, slower up; harder on bar starts), hard body rocking, bar-start dips; eased in/out at the edges.
+
 ## Feedback (Nov 14)
 - band2: TV effect too much (keep as a dial: `TVStatic(amount, vhs)`); drummer hand looked detached -> fixed (hand sits in the cuff).
 - Ben's band: Distor = drummer, blonde = guitarist (sings most in songs with vocals; all of them sing), bassist = left boys of the band page.
