@@ -126,6 +126,14 @@ Read this first in a new session, then `docs/TOOLKIT.md` (pipeline + lessons).
   clouds), aurora (moving curtains). The clearing plate now has an open (transparent) sky; `Campfire(sky=...)` takes a
   name, a schedule, or "tour" (twilight -> stars -> aurora in the first peak -> clouds -> stars).
 
+## Round 12 (Nov 15): real hand anatomy
+- Feedback: hands still looked like clay (tubes around a stick skeleton).
+- Hands now come from the MakeHuman base mesh and default rig (CC0): `tools/mh_hands.py` cuts both hands (+ some
+  forearm) with their finger bones and skin weights into `public/hands/mh_<side>.npz` (hand frame, meters). Hand3D
+  bends them by dual-quaternion skinning from our IK chains (each hand's own knuckles and bone lengths), adds a
+  subdivision, keeps the skin shader detail and nails (sized from the mesh's fingertips). `pose(reach=True)` moves the
+  hand until the fingertips get to their targets (works for any hand size).
+
 ## Feedback (Nov 14)
 - band2: TV effect too much (keep as a dial: `TVStatic(amount, vhs)`); drummer hand looked detached -> fixed (hand sits in the cuff).
 - Ben's band: Distor = drummer, blonde = guitarist (sings most in songs with vocals; all of them sing), bassist = left boys of the band page.

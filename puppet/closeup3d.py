@@ -201,9 +201,15 @@ class HandPose:
     def P(self, x, y, z=0.0):
         return self.W + self.f * x + self.l * y + self.dz * z
 
+    geom = None  # a hand's own knuckles and bone lengths (Hand3D sets it), else FINGERS/THUMB
+
     def chain(self, name, target=None, curl=0.6, spread=0.0):
-        (bx, by), lens, _ = FINGERS[name]
-        B = self.P(bx, by)
+        if self.geom is not None:
+            (bx, by, bz), lens = self.geom[name]
+            B = self.P(bx, by, bz)
+        else:
+            (bx, by), lens, _ = FINGERS[name]
+            B = self.P(bx, by)
         if target is None:  # relaxed: curled by `curl`, spread by `spread`
             fw = _unit(self.f * math.cos(spread) + self.l * math.sin(spread))
             down = -self.dz
@@ -223,7 +229,7 @@ class HandPose:
         return finger_ik(B, fw, down, lens, T), np.cross(fw, down)
 
     def thumb(self, target=None):
-        (bx, by, bz), lens, _ = THUMB
+        (bx, by, bz), lens = self.geom["thumb"] if self.geom is not None else THUMB[:2]
         B = self.P(bx, by, bz)
         T = self.P(0.10, 0.045, -0.04) if target is None else _v(*target)
         fw = _unit(T - B)
@@ -300,30 +306,72 @@ def _seg_dist(P, a, b):
 
 # ---------------------------------------------------------------- Blender side
 class Hand3D:
-    """A hand mesh made once at rest, bent per frame (see the module docstring)."""
+    """A hand bent per frame (see the module docstring). The mesh, bones and weights come from the
+    MakeHuman base mesh (CC0; public/hands/mh_<side>.npz, made by tools/mh_hands.py): real hand
+    anatomy (knuckles, finger pads, palm, tendons' shape) instead of tubes."""
 
     def __init__(self, name, side, mats):
         import bpy
         self.bpy = bpy
         self.side = side
+        D = np.load(f"{ROOT}/public/hands/mh_{side}.npz")
+        V = D["verts"].astype(float)
+        self.Wt = D["weights"].astype(float)
+        # the file is in the hand's own frame (forward, index side, back). As world points at rest, a left
+        # hand's frame is mirrored (index side -y), so every bone transform stays a rotation.
         lat = (0, 1, 0) if side == "right" else (0, -1, 0)
         rest = HandPose((0, 0, 0), (1, 0, 0), lat, (0, 0, 1))
-        chains = self.chains(rest, {}, None, curls={k: 0.12 for k in NAMES}, spread=True)
-        sk = self.skin_object(rest, chains)
-        dg = bpy.context.evaluated_depsgraph_get()
-        me = bpy.data.meshes.new_from_object(sk.evaluated_get(dg))
-        bpy.data.objects.remove(sk)
+        V = rest.P(V[:, 0:1], V[:, 1:2], V[:, 2:3]) if False else V * np.array([1.0, lat[1], 1.0])
+        self.geom = {}
+        rest_chains = []
+        for nm in NAMES + ["thumb"]:
+            cl = D[f"chain_{nm}"].astype(float)
+            lens = tuple(float(np.linalg.norm(cl[j + 1] - cl[j])) for j in range(3))
+            self.geom[nm] = (tuple(cl[0]), lens)
+            c = cl * np.array([1.0, lat[1], 1.0])
+            fw = _unit(c[3] - c[0])
+            if nm == "thumb":
+                sd = _unit(np.cross(fw, rest.dz))
+                down = _unit(np.cross(sd, fw))
+                if down @ (-rest.dz) < 0:
+                    down = -down
+            else:
+                fw = _unit(fw - (fw @ rest.dz) * rest.dz)
+                down = _unit(-rest.dz - ((-rest.dz) @ fw) * fw)
+            rest_chains.append((list(c), np.cross(fw, down)))
+        rest.geom = self.geom
+        self.handed = 1.0 if side == "right" else -1.0
+        faces = []
+        uvs = []
+        for q, u in zip(D["faces"], D["uv"]):
+            q, u = list(q), list(u)
+            if q[2] == q[3]:
+                q, u = q[:3], u[:3]
+            faces.append(q)
+            uvs.append(u)
+        me = bpy.data.meshes.new(name)
+        me.from_pydata([tuple(v) for v in V], [], faces)
+        uvl = me.uv_layers.new(name="UVMap")
+        k = 0
+        for poly, u in zip(me.polygons, uvs):
+            for li, uv in zip(poly.loop_indices, u):
+                uvl.data[li].uv = tuple(uv)
+            k += 1
         self.obj = bpy.data.objects.new(name, me)
         bpy.context.scene.collection.objects.link(self.obj)
-        me.materials.clear()
         me.materials.append(mats["skin"])
         for p in me.polygons:
             p.use_smooth = True
-        V = np.array([v.co[:] for v in me.vertices], float)
+        sub = self.obj.modifiers.new("sub", "SUBSURF")
+        sub.levels = sub.render_levels = 2
         self.Vh = np.c_[V, np.ones(len(V))]
-        self.R_inv = [np.linalg.inv(M) for M in bone_frames(rest, chains)]
-        self.weights(V, rest, chains)
-        self.attributes(me, V, rest, chains)
+        self.R_inv = [np.linalg.inv(M) for M in self._frames(rest, rest_chains)]
+        self.attributes(me, V, rest, rest_chains)
+        self.tip_r = {}
+        for nm, (c, _) in zip(NAMES + ["thumb"], rest_chains):  # fingertip thickness, for the nails
+            d, u, q = _seg_dist(V, c[2], c[3])
+            near = (u > 0.4) & (d < 0.015)
+            self.tip_r[nm] = float(np.median(d[near])) if near.any() else 0.007
         self.nails = []
         for k in range(5):
             bpy.ops.mesh.primitive_uv_sphere_add(segments=24, ring_count=12, radius=1.0)
@@ -341,112 +389,19 @@ class Hand3D:
         self.sleeve.data.materials.append(mats["sleeve"])
         bpy.ops.object.shade_smooth()
 
-    @staticmethod
-    def chains(hp, targets, thumb_target, curls=None, spread=False):
+    def _frames(self, hp, chains):
+        F = bone_frames(hp, chains)
+        if self.side == "left":  # the left mesh is stored with its own (mirrored) lateral: keep frames right-handed
+            pass
+        return F
+
+    def chains(self, hp, targets, thumb_target, curls=None, spread=False):
+        hp.geom = self.geom
         out = []
         for k in NAMES:
             out.append(hp.chain(k, targets.get(k), (curls or {}).get(k, 0.7), SPREAD[k] if spread else 0.0))
         out.append(hp.thumb(thumb_target))
         return out
-
-    def skin_object(self, hp, chains):
-        """The rest-pose hand from Blender's skin modifier over the skeleton, smoothed."""
-        bpy = self.bpy
-        pts = [hp.W, hp.P(-0.09, 0, -0.004), hp.P(0.03, 0.02, -0.012)]
-        for k in NAMES:
-            pts.append(hp.P(FINGERS[k][0][0] * 0.5, FINGERS[k][0][1] * 0.8, 0.0))
-        edges = [(0, 1), (0, 2)] + [(0, 3 + k) for k in range(4)]
-        rad = [0.021, 0.027, 0.017] + [0.0145] * 4
-        idx = 7
-
-        def dense(c):
-            o = []
-            for q in range(3):
-                o += [c[q], (c[q] + c[q + 1]) / 2]
-            return o + [c[3]]
-
-        def chain_radii(r0, r1):
-            J = [r0 * 1.02, r0 * 0.95, (r0 + r1) / 2 * 0.99, r1 * 0.97]
-            o = []
-            for q in range(3):
-                o += [J[q], 0.9 * (J[q] + J[q + 1]) / 2]
-            return o + [J[3]]
-        for k, (c, _) in enumerate(chains):
-            pts += dense(c)
-            edges.append((3 + k if k < 4 else 2, idx))
-            edges += [(idx + q, idx + q + 1) for q in range(6)]
-            rad += chain_radii(*(FINGERS[NAMES[k]][2] if k < 4 else THUMB[2]))
-            idx += 7
-        K = 1.55  # the skin hull over a dense skeleton comes out thinner than its radii
-        me = bpy.data.meshes.new("handskel")
-        me.from_pydata([tuple(p) for p in pts], edges, [])
-        o = bpy.data.objects.new("handskel", me)
-        bpy.context.scene.collection.objects.link(o)
-        o.modifiers.new("skin", "SKIN").use_smooth_shade = True
-        for i, r in enumerate(rad):
-            me.skin_vertices[0].data[i].radius = (r * K, r * K * 0.8)
-        me.skin_vertices[0].data[0].use_root = True
-        sub = o.modifiers.new("sub", "SUBSURF")
-        sub.levels = sub.render_levels = 2
-        return o
-
-    def bones(self, hp, chains):
-        """Segments per bone (the palm: several) for the weights, in the rest pose."""
-        palm = [(hp.W, chains[k][0][0]) for k in range(4)] + [(hp.W, hp.P(-0.09, 0, 0)), (hp.W, chains[4][0][0])]
-        segs, owner = [palm], [-1]
-        for k, (c, _) in enumerate(chains):
-            for j in range(3):
-                segs.append([(c[j], c[j + 1])])
-                owner.append(k)
-        return segs, owner
-
-    def weights(self, V, hp, chains):
-        """Skin weights from Blender's bone heat (automatic weights) on an armature whose bones are
-        the palm and the finger and thumb bones; falls back to distance weights if heat fails."""
-        bpy = self.bpy
-        segs, owner = self.bones(hp, chains)
-        arm = bpy.data.armatures.new("rig")
-        ao = bpy.data.objects.new("rig", arm)
-        bpy.context.scene.collection.objects.link(ao)
-        bpy.context.view_layer.objects.active = ao
-        bpy.ops.object.mode_set(mode="EDIT")
-        heads = [hp.W] + [s_[0][0] for s_ in segs[1:]]
-        tails = [(chains[1][0][0] + chains[2][0][0]) / 2] + [s_[0][1] for s_ in segs[1:]]
-        for i, (h, t) in enumerate(zip(heads, tails)):
-            eb = arm.edit_bones.new(f"b{i}")
-            eb.head, eb.tail = tuple(h), tuple(t)
-        bpy.ops.object.mode_set(mode="OBJECT")
-        ob = self.obj
-        for o in bpy.context.scene.objects:
-            o.select_set(False)
-        ob.select_set(True)
-        ao.select_set(True)
-        bpy.context.view_layer.objects.active = ao
-        Wt = np.zeros((len(V), len(segs)))
-        try:
-            bpy.ops.object.parent_set(type="ARMATURE_AUTO")
-            for vg in ob.vertex_groups:
-                b = int(vg.name[1:])
-                for i in range(len(V)):
-                    try:
-                        Wt[i, b] = vg.weight(i)
-                    except RuntimeError:
-                        pass
-        except Exception as e:  # noqa: BLE001
-            print("bone heat failed:", e)
-        if (Wt.sum(1) < 1e-6).mean() > 0.02:  # heat failed for many points: distance weights there
-            D = np.stack([np.min([_seg_dist(V, a, b)[0] for a, b in s_], 0) for s_ in segs], 1)
-            Wd = np.exp(-(D / 0.014) ** 2)
-            bad = Wt.sum(1) < 1e-6
-            Wt[bad] = Wd[bad]
-        Wt[:, 0] += 1e-6
-        self.Wt = Wt / Wt.sum(1, keepdims=True)
-        ob.parent = None
-        for m in list(ob.modifiers):
-            ob.modifiers.remove(m)
-        ob.vertex_groups.clear()
-        bpy.data.objects.remove(ao)
-        ob.matrix_world.identity()
 
     def attributes(self, me, V, hp, chains):
         """Rest-surface data for the skin shader."""
@@ -476,21 +431,29 @@ class Hand3D:
         a = me.attributes.new("rest", "FLOAT_VECTOR", "POINT")
         a.data.foreach_set("vector", V.reshape(-1).astype(np.float32))
 
-    def pose(self, hp, targets, thumb_target=None, curls=None):
+    def pose(self, hp, targets, thumb_target=None, curls=None, reach=True):
+        """reach: move the hand (not the targets) until the fingertips get to their targets."""
         from mathutils import Matrix, Vector
         chains = self.chains(hp, targets, thumb_target, curls)
-        A = np.stack([M @ Ri for M, Ri in zip(bone_frames(hp, chains), self.R_inv)])  # (bones, 4, 4)
+        for _ in range(4 if reach and targets else 0):
+            miss = [np.asarray(targets[k], float) - chains[i][0][3] for i, k in enumerate(NAMES) if k in targets]
+            m = np.mean(miss, 0)
+            if np.linalg.norm(m) < 0.002:
+                break
+            hp.W = hp.W + 0.85 * m
+            chains = self.chains(hp, targets, thumb_target, curls)
+        A = np.stack([M @ Ri for M, Ri in zip(self._frames(hp, chains), self.R_inv)])  # (bones, 4, 4)
         P = dq_skin(self.Wt, A, self.Vh[:, :3])
         me = self.obj.data
         me.vertices.foreach_set("co", P.reshape(-1).astype(np.float32))
         me.update()
-        for nl, (c, nrm), r in zip(self.nails, chains, [FINGERS[k][2][1] * 0.95 for k in NAMES] + [THUMB[2][1] * 0.95]):
+        for nl, (c, nrm), r in zip(self.nails, chains, [self.tip_r[k] for k in NAMES + ["thumb"]]):
             d = _unit(c[3] - c[2])
             up = _unit(np.cross(d, nrm))
             side = np.cross(up, d)
-            ctr = c[3] - d * r * 0.4 + up * r * 0.74
+            ctr = c[3] - d * r * 0.75 + up * r * 0.62
             R = Matrix(((d[0], side[0], up[0]), (d[1], side[1], up[1]), (d[2], side[2], up[2])))
-            nl.matrix_world = Matrix.Translation(Vector(ctr)) @ R.to_4x4() @ Matrix.Diagonal((r * 0.95, r * 0.72, r * 0.16, 1))
+            nl.matrix_world = Matrix.Translation(Vector(ctr)) @ R.to_4x4() @ Matrix.Diagonal((r * 0.85, r * 0.62, r * 0.12, 1))
         a, bb = hp.W - hp.f * 0.03, hp.W - hp.f * 0.42
         q = Vector((0, 0, 1)).rotation_difference(Vector(_unit(a - bb)))
         self.sleeve.matrix_world = Matrix.Translation(Vector((a + bb) / 2)) @ q.to_matrix().to_4x4() @ Matrix.Diagonal((0.05, 0.047, 0.39, 1))
@@ -530,12 +493,12 @@ def hand_materials(job):
     mix.inputs[7].default_value = (*(skin * np.array([1.12, 0.72, 0.68])), 1)
     n.set(b.inputs["Base Color"], mix.outputs[2])
     n.set(b.inputs["Roughness"], n.math("ADD", 0.38, n.math("MULTIPLY", mott, 0.18)))
-    nail, nn, nb = bk.material("nail", tuple(np.clip(skin * np.array([1.1, 0.88, 0.88]) + 0.08, 0, 1)), 0.18)
+    nail, nn, nb = bk.material("nail", tuple(np.clip(skin * np.array([1.05, 0.8, 0.8]), 0, 1)), 0.18)
     nb.inputs["Coat Weight"].default_value = 1.0
     nb.inputs["Coat Roughness"].default_value = 0.08
     gx = nn.xyz(nn.node("ShaderNodeTexCoord").outputs["Generated"])[0]
-    nn.set(nb.inputs["Base Color"], nn.ramp(gx, [(0.25, tuple(skin * np.array([1.0, 0.75, 0.75]) + 0.05)), (0.62, tuple(skin * 1.1 + 0.08)),
-                                                 (0.8, (0.85, 0.82, 0.78))]))
+    nn.set(nb.inputs["Base Color"], nn.ramp(gx, [(0.3, tuple(skin * np.array([1.0, 0.72, 0.72]))), (0.7, tuple(skin * np.array([1.05, 0.85, 0.82]))),
+                                                 (0.86, tuple(np.clip(skin * 1.25 + 0.05, 0, 1)))]))
     cloth, n2, b2 = bk.material("sleeve", tuple(job["sleeve"]), 0.85)
     b2.inputs["Sheen Weight"].default_value = 0.6
     weave = n2.node("ShaderNodeTexWave", Vector=n2.node("ShaderNodeTexCoord").outputs["Object"], Scale=180.0)
