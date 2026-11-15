@@ -46,10 +46,10 @@
  "arm": {
   "upper": 680,
   "fore": 600,
-  "width": 195
+  "width": 240
  },
  "dark_eyes": true,
- "hand_length": 430,
+ "hand_length": 490,
  "head": {
   "head_ells": [
    [
@@ -83,11 +83,11 @@
   ],
   "mouth": [
    760,
-   935,
+   887,
    200,
    120
   ],
-  "chin": 990,
+  "chin": 985,
   "eyes": [
    [
     570,

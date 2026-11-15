@@ -278,7 +278,7 @@ class Production:
         self.backdrop, self.fore, self.post = backdrop, fore, post
         props.set_marker(marker)  # how hand-drawn the code-drawn props look (1 = marker style, 0 = closer to real)
         self.cast = {}
-        self.stage = Stage(song, stage)
+        self.stage = Stage(song, stage) if isinstance(stage, str) else stage  # or any object with frame(t, wide, cue) and .dark
 
     def who(self, shot):
         names = shot if isinstance(shot, (tuple, list)) else (shot,)
@@ -342,7 +342,7 @@ class Production:
         if self.look is not None:
             frame = self.look(frame, f)
         credit = list(dict.fromkeys([w.j["credit"] for w in who])) + [self.song.credit]
-        img = finish(frame, t, 0, 1, rng, credit, zoom=(z, z), focus=focus, vignette=0.45 if self.stage.dark else 0.12, roll=roll)
+        img = finish(frame, t, 0, 1, rng, credit, zoom=(z, z), focus=focus, vignette=getattr(self.stage, "vignette", 0.45 if self.stage.dark else 0.12), roll=roll)
         return self.post(img, t) if self.post else img
 
     def parallax_bg(self, frame, z, fc):

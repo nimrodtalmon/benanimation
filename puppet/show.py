@@ -33,8 +33,8 @@ import numpy as np
 
 import rig
 from groove import Groove
-from production import H, W, HandDrawn, Looks, Production, Stage, TVStatic
-from scenery import Haze, Sign, title_card
+from production import W, HandDrawn, Looks, Production, TVStatic
+from scenery import title_card
 
 
 @dataclass
@@ -59,8 +59,10 @@ def head_box(j):
 
 class Show:
     def __init__(self, song, band, name, script, logo=None, end_lines=(), marker=0.25, tv=(0.05, 0.25), head=0.45,
-                 style="mix", groove_drums=0.6, flash_cuts=True, tape_trick=2, kit="classic", kit_size=1.15):
-        """kit: a 3D kit (public/kits/<kit>.json, puppet/kit3d.py) or None for the code-drawn one."""
+                 style="mix", groove_drums=0.6, flash_cuts=True, tape_trick=2, kit="classic", kit_size=1.15, venue=None):
+        """kit: a 3D kit (public/kits/<kit>.json, puppet/kit3d.py) or None for the code-drawn one.
+        venue: where the show happens (puppet/venues.py): Club() (default: a stage, lights, the logo
+        sign) or Campfire() (a dusk walk through the woods in the intro, then a fire at night)."""
         self.song, self.band, self.name, self.script = song, band, name, os.path.abspath(script)
         self.logo, self.end_lines = logo, list(end_lines)
         self.marker, self.tv, self.head, self.style = marker, tv, head, style
@@ -83,10 +85,13 @@ class Show:
         self.shouts = [self.band_in] + [b for a, b in self.stops]
         self.crash = np.array([e["t"] for e in d.get("drums", []) if e["piece"] == 49])
         self.voice = song.vocal_drivers() if self.singers else None
-        self.sign = Sign(logo, width=820, y=70) if logo is not None else None
-        self.haze = Haze()
+        from venues import Club
+        self.venue = venue or Club()
+        if self.venue.tv is not None:
+            self.tv = self.venue.tv
         self._cast = self.make_cast()
         self.shots = self.plan()
+        self.venue.bind(self)
 
     # ---- the cast in every shot size
     def x_of(self, m, kind):
@@ -132,6 +137,12 @@ class Show:
                 from cast.portrait import Portrait
                 cast[r + "_side"] = (lambda m=m: Portrait(self.song, m.side, head=self.head, seed=m.seed, shouts=self.shouts, sings=m.sings))
             wide.append("w_" + r)
+            if self.venue.travel and r != "drums":  # on the way: the same busts, walking
+                from venues import Walking
+                for k in ("solo", "close"):
+                    cast[f"walk_{r}" + ("" if k == "solo" else "_close")] = (lambda m=m, k=k: Walking(self.bust(m, k), self.song))
+                cast["walk_w_" + r] = (lambda m=m: Walking(self.bust(m, "duo", self.x_of(m, "duo") or W / 2), self.song, phase=0.5 * self.front.index(m)))
+        self.WALK = tuple("walk_w_" + m.role for m in self.front[:2]) if self.venue.travel and len(self.front) >= 2 else None
         # the wide shot draws back to front: the drummer first
         self.WIDE = tuple(sorted(wide, key=lambda n: 0 if n == "w_drums" else 1))
         self.DUO = tuple(duo) if len(duo) == 2 else None
@@ -182,8 +193,12 @@ class Show:
                 while bars[j] > self.band_in - 0.3 and j > i + 1:
                     j -= 1
                 feat = [m for m in self.band if self.playing_in(m, bars[i], bars[j])] or [self.band[0]]
+                if self.venue.travel:  # on the way there: the drummer waits at the destination
+                    feat = [m for m in feat if m.role != "drums"] or self.front[:1]
                 m = feat[k % len(feat)]
                 opts = [m.role, self.WIDE, m.role + "_close"]
+                if self.venue.travel and m.role != "drums":  # walking there: the player, the two together, close
+                    opts = ["walk_" + m.role, self.WALK, "walk_" + m.role + "_close"]
                 shots.append((t0, bars[j], opts[k % 3] or m.role, dict(zoom=(1.0, 1.04) if k % 2 == 0 else (1.04, 1.0))))
                 k += 1
                 t0, i = bars[j], j
@@ -251,33 +266,13 @@ class Show:
         return None
 
     def cue(self, t, shot):
-        if t < self.band_in:
-            x = self.spot_x(shot, t)
-            k = 0.35 if self.hole_at(t) else 1.0
-            return dict(beams=0.12, house=0.55 * k, spot=(x, 1.3 * k) if x is not None else None)
-        if t >= self.end:
-            return dict(beams=0.0, house=max(0.0, 1 - (t - self.end) / 0.6))
-        if self.hole_at(t):
-            return dict(beams=0.0, house=0.3)
-        return dict(beams=1.0, house=1.0)
+        return self.venue.cue(t, shot)
 
     def backdrop(self, frame, t, shot):
-        if self.sign is None or t < self.band_in - 0.05 or t >= self.end + 0.4:
-            return
-        on = min(1.0, (t - self.band_in + 0.05) / 0.08)
-        bar = int(t / self.song.bar) % 4
-        col = (0.30, 0.25, 1.0) if self.hole_at(t) else tuple(0.5 + 0.5 * np.array(Stage.COLORS[bar]))
-        self.sign.draw(frame, t, col, 0.8 * on)
+        self.venue.backdrop(frame, t, shot)
 
     def fore(self, frame, t, shot):
-        self.haze.draw(frame, t, 1.4 if t < self.band_in else 0.8)
-        flash = 0.0
-        for t_on in self.shouts:
-            u = t - t_on
-            if 0 <= u < 0.4:
-                flash = max(flash, math.exp(-u / 0.09))
-        if flash > 0 and self.band_in > 0.5:
-            frame += 0.35 * flash
+        self.venue.fore(frame, t, shot)
 
     def post(self, img, t):
         if self.logo is None:
@@ -292,7 +287,7 @@ class Show:
     def production(self):
         b0 = self.band_in
         return Production(self.song, self._cast, self.shots, name=self.name, script=self.script,
-                          look=Looks(HandDrawn(), TVStatic(self.tv[0], vhs=self.tv[1])), stage="stage", crowd_wide=False, cue=self.cue,
+                          look=Looks(HandDrawn(), TVStatic(self.tv[0], vhs=self.tv[1])), stage=self.venue.stage(self.song), crowd_wide=False, cue=self.cue,
                           drift=lambda a: 0.015 if a < b0 else (0.05 if a < b0 + 0.35 * (self.end - b0) else (0.065 if a < b0 + 0.7 * (self.end - b0) else 0.09)),
                           parallax=0.55, ghost=0.35, backdrop=self.backdrop, fore=self.fore, post=self.post, marker=self.marker)
 

@@ -73,6 +73,22 @@ Read this first in a new session, then `docs/TOOLKIT.md` (pipeline + lessons).
   the song) -> score "peaks"; Groove style "mix" goes all-out there: head-banging on every beat (snap down, tip
   forward, slower up; harder on bar starts), hard body rocking, bar-start dips; eased in/out at the edges.
 
+## Round 9 (Nov 15): venues, a second story on the same song
+- Fixes: rack tom moved toward the camera (`public/kits/classic.json`); mouth lines moved up to the drawn lips and chins
+  set at the real chin (blonde, bassboy, blonde_side) so the jaw opens at the mouth; guitarist arms/hands thicker.
+  Lesson: put a rig's "mouth" y on the drawn lip line (check with an overlay), not between lips and chin.
+- `puppet/venues.py`: where a Show happens is a plug-in. A venue gives the stage (`frame(t, wide, cue)`), light cues,
+  backdrop and fore. `Club()` = the old stage (spotlight, beams, sign, haze, white flashes). `Campfire()` = the intro is
+  a walk through woods at sunset (venue.travel -> Show adds walking busts `walk_<role>`, `walk_<role>_close`, the pair
+  `walk_w_<role>`; the drummer waits at the destination), then a clearing at night with a fire that follows the band
+  (heat curve: embers in breaks, flare-ups on shouts, more in peaks, dies after the last hit).
+- `puppet/outdoors.py`: code-drawn scenery: `Sky` (sunset -> night, sun, stars, crescent moon, far hills, pine
+  ridge, near pines, clearing edge and ground, ferns in front; layers wrap and scroll at their own speeds),
+  `firelight` (ambient dusk/moonlight x picture + flickering warm falloff from the fire, also off-screen),
+  `Fire` (stones, logs, embers, banded cartoon flames, glow), `Sparks` (stateless particles: stream with heat, bursts).
+- `Walking(player, song)` wraps any bust player (one step a beat). `Production(stage=<object>)` accepts any stage.
+- New clip: `clips/campfire` = clips/distorted with `venue=Campfire()`.
+
 ## Feedback (Nov 14)
 - band2: TV effect too much (keep as a dial: `TVStatic(amount, vhs)`); drummer hand looked detached -> fixed (hand sits in the cuff).
 - Ben's band: Distor = drummer, blonde = guitarist (sings most in songs with vocals; all of them sing), bassist = left boys of the band page.
