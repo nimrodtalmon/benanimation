@@ -229,7 +229,7 @@ class Campfire(Venue):
     def fire_spot(self, shot):
         """Where the fire is in this shot: (x, base y, scale); off-screen below for the singles."""
         if isinstance(shot, tuple):
-            return W / 2, H * 0.99, 0.8  # the wide shot: in front of the band, in the middle
+            return W / 2, H * (0.965 if self.real else 0.99), (1.15 if self.real else 0.8)  # the wide shot: in front of the band, in the middle
         if shot.endswith("_side"):
             return W * 0.18, H + 140, 2.2
         if shot.endswith("_close"):

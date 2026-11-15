@@ -277,7 +277,7 @@ class Fire3D:
         Hh, Ww = frame.shape[:2]
         heat = float(heat)
         fl = 1 + 0.08 * math.sin(13.1 * t) + 0.06 * math.sin(21.7 * t + 1) + 0.05 * math.sin(7.3 * t + 2)
-        lin = self.amb[..., :3] * 0.6 + self.lit[..., :3] * (0.8 * heat * fl) + self.ember[..., :3] * (0.35 + 0.65 * min(1.4, heat))
+        lin = self.amb[..., :3] * 0.6 + self.lit[..., :3] * (0.45 * heat * fl) + self.ember[..., :3] * (0.35 + 0.65 * min(1.4, heat))
         a = self.amb[..., 3:4]
         rgb = np.concatenate([bk.tonemap(lin)[..., ::-1], a], 2)  # BGR + alpha
         s = sc * 500.0 / self.meta["size"][0]  # at scale 1 the fire is 500 px wide

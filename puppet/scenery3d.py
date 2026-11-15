@@ -456,9 +456,13 @@ class Scenery3D:
 
     def ferns(self, frame, travel, dusk):
         self._scroll(frame, self.layers["ferns"], 1.5 * travel, self.grade(dusk))
+        if not hasattr(self, "_foot"):  # the ground right in front: dark and out of focus
+            yy = np.linspace(0, 1, frame.shape[0], dtype=np.float32)[:, None, None]
+            self._foot = 1 - 0.92 * np.clip((yy - 0.80) / 0.14, 0, 1) ** 1.3
+        frame *= self._foot
 
     def clearing(self, frame, heat, flicker=1.0, moon=1.0):
-        lin = self.c_amb * moon + self.c_fire * (0.9 * heat * flicker)
+        lin = self.c_amb * moon + self.c_fire * (0.45 * heat * flicker)
         frame[:] = bk.tonemap(lin, self.night_exposure)[..., ::-1]
         return frame
 
