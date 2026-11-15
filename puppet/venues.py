@@ -118,9 +118,12 @@ class Campfire(Venue):
     tv = (0.03, 0.15)
     dark, vignette = False, 0.4
 
-    def __init__(self, seed=5, walk_speed=260.0, real=True, scenery="forest", fire="campfire"):
+    def __init__(self, seed=5, walk_speed=260.0, real=True, scenery="forest", fire="campfire", sky="tour"):
+        """sky: the night sky over the clearing (puppet/skies.py): a name ("twilight", "stars",
+        "clouds", "aurora"), a schedule [(t, name), ...], or "tour": twilight when they arrive, then
+        stars, an aurora in the first peak, moonlit clouds after it, stars at the end."""
         self.seed, self.walk_speed, self.real = seed, walk_speed, real
-        self.scenery_name, self.fire_name = scenery, fire
+        self.scenery_name, self.fire_name, self.sky_spec = scenery, fire, sky
 
     def bind(self, show):
         self.show = show
@@ -149,12 +152,27 @@ class Campfire(Venue):
         if self.real:
             from fire3d import Fire3D
             from scenery3d import Scenery3D
+            from skies import Skies
             self.scn = Scenery3D(self.scenery_name)
             self.fire = Fire3D(self.fire_name)
-            self._night_sky()
+            self.skies = Skies(self.seed)
+            self.sky_schedule = self._schedule()
         else:
             self.sky = Sky(seed=self.seed)
             self.fire = Fire(seed=self.seed)
+
+    def _schedule(self):
+        sp, s = self.sky_spec, self.show
+        if isinstance(sp, str) and sp != "tour":
+            return [(0.0, sp)]
+        if isinstance(sp, (list, tuple)):
+            return list(sp)
+        peaks = s.song.data.get("peaks", [])
+        out = [(0.0, "twilight"), (s.band_in + 10, "stars")]
+        if peaks:
+            out += [(peaks[0][0], "aurora"), (peaks[0][1], "clouds")]
+        out.append((s.end - 6, "stars"))
+        return sorted(out)
 
     def _night_sky(self):
         """Stars and a moon where the clearing plate shows sky."""
@@ -216,8 +234,7 @@ class Campfire(Venue):
         f = np.empty((H, W, 3), np.float32)
         if walk:
             return self.scn.walk(f, t, travel, self.dusk(t))
-        self.scn.clearing(f, self.heat_at(t), self.flicker(t))
-        f += self.stars * (0.8 + 0.2 * math.sin(t * 2.3)) + self.moon
+        self.scn.clearing(f, self.heat_at(t), self.flicker(t), sky=self.skies.mix(self.sky_schedule, t))
         return f
 
     def cue(self, t, shot):

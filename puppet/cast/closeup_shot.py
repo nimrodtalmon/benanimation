@@ -9,9 +9,9 @@ from production import H, W
 
 
 class CloseUpShot:
-    def __init__(self, song, rig_name, kind, t0, t1, light="stage", res=(854, 480), samples=12):
+    def __init__(self, song, rig_name, kind, t0, t1, light="stage", res=(1024, 576), samples=10, model=None):
         self.j = rig.load(rig_name)
-        job = closeup_job(song, rig_name, kind, t0, t1, light=light, res=res, samples=samples)
+        job = closeup_job(song, rig_name, kind, t0, t1, light=light, res=res, samples=samples, model=model)
         self.cu = CloseUp(job) if job else None
 
     def draw(self, frame, t):

@@ -59,7 +59,7 @@ def head_box(j):
 
 class Show:
     def __init__(self, song, band, name, script, logo=None, end_lines=(), marker=0.25, tv=(0.05, 0.25), head=0.45,
-                 style="mix", groove_drums=0.6, flash_cuts=True, tape_trick=2, kit="classic", kit_size=1.15, venue=None, closeups=4):
+                 style="mix", groove_drums=0.6, flash_cuts=True, tape_trick=2, kit="classic", kit_size=1.15, venue=None, closeups=5):
         """kit: a 3D kit (public/kits/<kit>.json, puppet/kit3d.py) or None for the code-drawn one.
         venue: where the show happens (puppet/venues.py): Club() (default: a stage, lights, the logo
         sign) or Campfire() (a dusk walk through the woods in the intro, then a fire at night).
@@ -254,15 +254,20 @@ class Show:
         if not self.n_closeups:
             return shots
         from cast.closeup_shot import CloseUpShot
-        players = [m for m in self.front if rig.load(m.rig).get("play", {}).get("model")]
+        players = self.drums[:1] + [m for m in self.front if rig.load(m.rig).get("play", {}).get("model")]
         if not players:
             return shots
-        kinds = lambda m: ("fret", "pluck") if rig.load(m.rig)["play"].get("instrument") == "bass" else ("fret",)  # noqa: E731
+
+        def kinds(m):
+            if m.role == "drums":
+                return ("sticks",)
+            return ("fret", "pluck") if rig.load(m.rig)["play"].get("instrument") == "bass" else ("pick", "fret")
         out, made = [], 0
 
         def cast(m, kind, a, b):
             nm = f"cu_{m.role}_{kind}_{len(self._cast)}"
-            self._cast[nm] = (lambda: CloseUpShot(self.song, m.rig, kind, a, b, light=self.venue.closeup_light(a)))
+            model = self.kit_name if m.role == "drums" else None
+            self._cast[nm] = (lambda: CloseUpShot(self.song, m.rig, kind, a, b, light=self.venue.closeup_light(a), model=model))
             return nm
         intro_done = False
         flash0 = self.band_in + 0.75 * (self.end - self.band_in)
@@ -273,14 +278,14 @@ class Show:
                 m = next((p for p in players if p.role == role), players[0])
                 ks = kinds(m)
                 mid = a + (b - a) / 2
-                out.append((a, mid, cast(m, ks[0], a, mid), {}))
-                out.append((mid, b, cast(m, ks[-1], mid, b), {}))
+                out.append((a, mid, cast(m, ks[0], a, mid), dict(look=False)))
+                out.append((mid, b, cast(m, ks[-1], mid, b), dict(look=False)))
                 made += 1
                 intro_done = True
                 continue
             out.append((a, b, w, o))
         # the rest: evenly over the song, on single-player shots away from breaks and flash cuts
-        cand = [i for i, (a, b, w, o) in enumerate(out) if isinstance(w, str) and not w.startswith("cu_") and "tmap" not in o
+        cand = [i for i, (a, b, w, o) in enumerate(out) if isinstance(w, str) and not w.startswith("cu_") and "tmap" not in o and "look" not in o
                 and self.band_in + 6 < a < flash0 and not self.hole_at(a) and not self.hole_at(b - 0.01) and b - a > 0.8 * self.song.bar]
         need = self.n_closeups - made
         if need > 0 and cand:
@@ -289,7 +294,7 @@ class Show:
                 a, b, w, o = out[i]
                 m = players[k % len(players)]
                 ks = kinds(m)
-                out[i] = (a, b, cast(m, ks[(k // len(players)) % len(ks)], a, b), {})
+                out[i] = (a, b, cast(m, ks[(k // len(players)) % len(ks)], a, b), dict(look=False))
         return out
 
     def hole_at(self, t):

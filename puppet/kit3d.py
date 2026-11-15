@@ -35,30 +35,14 @@ def cache_dir(name):
 
 
 # ---------------------------------------------------------------- Blender side (build)
-def build(name, samples=96):
-    import bpy
-    import bmesh
-    from bpy_extras.object_utils import world_to_camera_view
-    from mathutils import Euler, Matrix, Vector
-
-    spec = json.load(open(spec_path(name)))
-    out = cache_dir(name)
-    os.makedirs(out, exist_ok=True)
-    M = 0.01  # cm -> m
-    bpy.ops.wm.read_factory_settings(use_empty=True)
-    sc = bpy.context.scene
-    sc.render.engine = "CYCLES"
-    sc.cycles.device = "CPU"
-    sc.cycles.samples = samples
-    sc.cycles.use_denoising = True
-    sc.render.film_transparent = True
-    sc.view_settings.view_transform = "AgX"
-    sc.view_settings.look = "AgX - Medium High Contrast"
-    W_, H_ = spec["camera"]["resolution"]
-    sc.render.resolution_x, sc.render.resolution_y = W_, H_
-    sc.render.image_settings.file_format = "PNG"
-    sc.render.image_settings.color_mode = "RGBA"
-
+def model(spec, sc):
+    """Build the kit's pieces (materials, drums, cymbals, stands) in the current Blender scene from
+    a kit spec. Returns the pieces' groups (by key), the moving cymbals, and world_pos (spec cm ->
+    Blender meters). Used by build() and by closeup3d.py."""
+    import bpy  # noqa: I001
+    import bmesh  # noqa: F401
+    from mathutils import Euler, Matrix, Vector  # noqa: F401
+    M = 0.01
     # ---- materials
     def mat(name_, base, metallic=0.0, rough=0.5, coat=0.0, coat_rough=0.03, aniso=0.0):
         m = bpy.data.materials.new(name_)
@@ -354,6 +338,36 @@ def build(name, samples=96):
             a = 2 * math.pi * i / 3 + 0.3
             rod(st, (0, 0, sc_.z - 0.1), (0.12 * math.cos(a), 0.12 * math.sin(a), sc_.z - 0.06), 0.006)
 
+    return dict(P=P, groups=groups, moving=moving, world_pos=world_pos, M=M)
+
+
+def build(name, samples=96):
+    import bpy
+    import bmesh
+    from bpy_extras.object_utils import world_to_camera_view
+    from mathutils import Euler, Matrix, Vector
+
+    spec = json.load(open(spec_path(name)))
+    out = cache_dir(name)
+    os.makedirs(out, exist_ok=True)
+    M = 0.01  # cm -> m
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    sc = bpy.context.scene
+    sc.render.engine = "CYCLES"
+    sc.cycles.device = "CPU"
+    sc.cycles.samples = samples
+    sc.cycles.use_denoising = True
+    sc.render.film_transparent = True
+    sc.view_settings.view_transform = "AgX"
+    sc.view_settings.look = "AgX - Medium High Contrast"
+    W_, H_ = spec["camera"]["resolution"]
+    sc.render.resolution_x, sc.render.resolution_y = W_, H_
+    sc.render.image_settings.file_format = "PNG"
+    sc.render.image_settings.color_mode = "RGBA"
+
+    km = model(spec, sc)
+    P, groups, moving, world_pos = km["P"], km["groups"], km["moving"], km["world_pos"]
+
     # ---- floor (catches the shadows), lights, camera
     bpy.ops.mesh.primitive_plane_add(size=12, location=(0, 1, 0))
     floor = bpy.context.object
@@ -486,8 +500,10 @@ class Kit3D:
         characters with big heads look better with a bigger kit). Scales about the shoulders,
         without re-rendering."""
         import cv2
-        d = cache_dir(name)
-        if not os.path.exists(f"{d}/meta.json"):
+        import blendkit
+        d = blendkit.built(cache_dir(name))  # the newest finished render (rebuild explicitly after editing the builder)
+        if d is None:
+            d = cache_dir(name)
             subprocess.run([sys.executable, os.path.abspath(__file__), "build", name], check=True)
         self.dir, self.meta = d, json.load(open(f"{d}/meta.json"))
         S = np.array(SHOULDER_UNITS, float)

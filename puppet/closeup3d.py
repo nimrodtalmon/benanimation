@@ -1,22 +1,26 @@
-"""Instrument close-ups in 3D (Blender, Cycles): a player's hands on a 3D instrument, played from
-the score, shallow focus. Any rig whose "play" names a 3D model (public/instruments/*.json) gets
-them; the hands take the skin and sleeve colors from the rig's drawing.
+"""Instrument close-ups in 3D (Blender, Cycles): a player's hands on their 3D instrument, played
+from the score, shallow focus. Any rig whose "play" names a 3D model (public/instruments/*.json)
+gets them, and any drummer at a 3D kit (public/kits/*.json); the hands take the skin and sleeve
+colors from the rig's drawing.
 
-  job = closeup_job(song, rig, "fret", t0, t1, light="fire")   # or "pluck"
+  job = closeup_job(song, rig, kind, t0, t1, light="fire", model=None)
   frames = CloseUp(job)          # renders once (cached under out/closeupcache/), then frames.at(t)
 
 Kinds:
-- "fret": the fretting hand from above the neck, fingers on the notes' strings and frets, the
-  thumb behind the neck, the hand sliding along the neck between positions.
-- "pluck": the plucking hand over the pickup, index and middle alternating rest strokes on the
-  notes' strings, the thumb anchored, the strings shaking after each pluck.
-Hands: a skeleton (wrist, palm rays, three bones a finger, the thumb) wrapped by Blender's skin
-modifier and smoothed; fingers reach their targets by a small planar IK (the last joint follows
-the middle one); skin with subsurface scattering, nails. Light presets: "fire" (warm from below,
-cool moon rim), "sunset" (warm low side light, blue sky fill), "stage" (colored rims).
-Strings: real tubes (wound ones with windings) that shake when plucked; rendered on threes
-(10 fps), with a slow push-in. The 2D shot (cast/closeup_shot.py) puts it over the venue's
-picture thrown out of focus.
+- "fret": the fretting hand from above the neck, a finger a fret on the notes' strings, the thumb
+  behind the neck, the hand sliding along the neck between positions.
+- "pluck": the plucking hand over the pickup (bass), index and middle alternating rest strokes.
+- "pick": the picking hand (guitar) strumming the chords down and up with a pick.
+- "sticks": a drummer's two hands and sticks on the snare and the hi-hat (model = the kit's name).
+Hands: one mesh per hand, made once in a rest pose (Blender's skin modifier over a skeleton of
+wrist, palm, three bones a finger and the thumb, smoothed), then bent per frame by linear blend
+skinning from bone frames that follow the joints. Skin detail lives on the rest surface (stored
+rest position and per-point joint distance, back/palm side, distance to the tip), so wrinkles on
+the knuckles, palm creases, pores, redness at the joints and fingertips stay put as the fingers
+move. Subsurface scattering, nails with a pale free edge, the rig's sleeve. Fingers reach their
+targets by a small planar IK (the last joint follows the middle one). Light presets: "fire"
+(warm from below, cool moon rim), "sunset", "stage". Rendered on threes (10 fps) with a slow
+push-in; the 2D shot (cast/closeup_shot.py) puts it over the venue's picture out of focus.
 """
 import fcntl
 import hashlib
@@ -31,7 +35,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-FPS = 10  # on threes: steadier for the eye, a third of the renders
+FPS = 10  # on threes
 
 # finger skeleton (meters): MCP knuckle (forward, lateral toward the index side), bone lengths, radii
 FINGERS = dict(index=((0.090, 0.024), (0.043, 0.026, 0.020), (0.0098, 0.0080)),
@@ -39,6 +43,9 @@ FINGERS = dict(index=((0.090, 0.024), (0.043, 0.026, 0.020), (0.0098, 0.0080)),
                ring=((0.088, -0.015), (0.044, 0.027, 0.020), (0.0096, 0.0078)),
                pinky=((0.077, -0.032), (0.034, 0.021, 0.018), (0.0085, 0.0068)))
 THUMB = ((0.022, 0.028, -0.012), (0.042, 0.032, 0.027), (0.0125, 0.0092))
+NAMES = ["index", "middle", "ring", "pinky"]
+SPREAD = dict(index=0.12, middle=0.0, ring=-0.1, pinky=-0.22)  # rest abduction (rad)
+LEFT_DRUMS, RIGHT_DRUMS = {38, 40}, {42, 44, 46, 49, 51, 57, 59}
 
 
 # ---------------------------------------------------------------- the job (2D side)
@@ -75,7 +82,11 @@ def rig_colors(rig):
     d = f"{ROOT}/public/parts/{rig}"
     j = json.load(open(f"{d}/parts.json"))
     body = cv2.imread(f"{d}/body.png", cv2.IMREAD_UNCHANGED)
-    fx, fy, frx, fry = j["head"]["face"][:4]
+    if "head" in j:
+        fx, fy, frx, fry = j["head"]["face"][:4]
+    else:
+        import warp
+        fx, fy, frx, fry = warp.CHARS[rig]["face"][:4]
     fx += j.get("pad", 0)
     patch = body[int(fy + 0.15 * fry):int(fy + 0.45 * fry), int(fx - 0.5 * frx):int(fx + 0.5 * frx)]
     px = patch[patch[..., 3] > 200][:, :3].astype(np.float32)
@@ -88,24 +99,32 @@ def rig_colors(rig):
     return lin(skin), lin(sleeve)
 
 
-def closeup_job(song, rig, kind, t0, t1, light="fire", res=(1280, 720), samples=24):
+def closeup_job(song, rig, kind, t0, t1, light="fire", res=(1280, 720), samples=20, model=None):
     j = json.load(open(f"{ROOT}/public/parts/{rig}/parts.json"))
+    skin, sleeve = rig_colors(rig)
+    base = dict(rig=rig, kind=kind, t0=round(t0, 3), t1=round(t1, 3), fps=FPS, light=light, res=list(res), samples=samples,
+                skin=skin, sleeve=sleeve, seed=int(sum(map(ord, rig)) + 7 * int(t0)))
+    if kind == "sticks":
+        hits = [[round(e["t"], 3), int(e["piece"])] for e in song.data.get("drums", []) if t0 - 1.0 <= e["t"] < t1 + 0.5]
+        return dict(base, model=model or "classic", family="kit", notes=hits)
     play = j.get("play", {})
-    model = play.get("model")
+    model = model or play.get("model")
     if model is None:
         return None
     inst = json.load(open(f"{ROOT}/public/instruments/{model}.json"))
     key = "bass" if play.get("instrument") == "bass" or inst["strings"] == 4 else "guitar"
-    ev = song.data.get(key, [])
-    notes = [(e["t"], e.get("pitch", e.get("root", 40))) for e in ev if t0 - 2.0 <= e["t"] < t1 + 0.5]
-    skin, sleeve = rig_colors(rig)
-    return dict(rig=rig, model=model, kind=kind, t0=round(t0, 3), t1=round(t1, 3), fps=FPS, light=light, res=list(res), samples=samples,
-                notes=[[round(t, 3), s, f] for t, s, f in finger_notes(notes, inst["strings"])], skin=skin, sleeve=sleeve,
-                seed=int(sum(map(ord, rig)) + 7 * int(t0)))
+    ev = [e for e in song.data.get(key, []) if t0 - 2.0 <= e["t"] < t1 + 0.5]
+    notes = [(e["t"], e.get("pitch", e.get("root", 40))) for e in ev]
+    out = dict(base, model=model, family="string", notes=[[round(t, 3), s, f] for t, s, f in finger_notes(notes, inst["strings"])])
+    if kind == "pick":
+        out["strums"] = [[round(e["t"], 3), e.get("dir", "down"), bool(e.get("accent"))] for e in ev]
+    return out
 
 
 def job_dir(job):
-    src = b"".join(open(f, "rb").read() for f in (os.path.abspath(__file__), f"{ROOT}/puppet/guitar3d.py", f"{ROOT}/public/instruments/{job['model']}.json"))
+    spec = f"{ROOT}/public/kits/{job['model']}.json" if job.get("family") == "kit" else f"{ROOT}/public/instruments/{job['model']}.json"
+    builder = f"{ROOT}/puppet/kit3d.py" if job.get("family") == "kit" else f"{ROOT}/puppet/guitar3d.py"
+    src = b"".join(open(f, "rb").read() for f in (os.path.abspath(__file__), builder, spec))
     h = hashlib.sha1(json.dumps(job, sort_keys=True).encode() + src).hexdigest()[:12]
     return f"{ROOT}/out/closeupcache/{job['rig']}-{job['kind']}-{h}"
 
@@ -130,7 +149,7 @@ class CloseUp:
         self.frames = {}
 
     def at(self, t):
-        """BGRA float image of the shot at time t (on twos)."""
+        """BGRA float image of the shot at time t."""
         self.ensure()
         i = int(np.clip(round((t - self.job["t0"]) * FPS), 0, self.meta["n"] - 1))
         if i not in self.frames:
@@ -141,7 +160,7 @@ class CloseUp:
         return self.frames[i]
 
 
-# ---------------------------------------------------------------- Blender side
+# ---------------------------------------------------------------- hand geometry (numpy)
 def _v(*a):
     return np.array(a, float)
 
@@ -151,8 +170,8 @@ def _unit(v):
 
 
 def finger_ik(B, fwd, down, lens, T):
-    """Planar IK: MCP and PIP flex (DIP = 0.7 PIP) so the tip reaches T. fwd/down span the plane
-    (after abduction toward T). Returns the joint points [B, P1, P2, tip]."""
+    """Planar IK: MCP and PIP flex (DIP = 0.7 PIP) so the tip reaches T. fwd/down span the plane.
+    Returns the joint points [B, P1, P2, tip]."""
     rel = T - B
     a, b = float(rel @ fwd), float(rel @ down)
     th1 = np.linspace(-0.05, 1.5, 90)[:, None]  # no bending backward
@@ -171,8 +190,9 @@ def finger_ik(B, fwd, down, lens, T):
 
 
 class HandPose:
-    """A hand placed by a frame (wrist, forward, lateral toward the index side, dorsal), with
-    targets for fingertips; gives the skeleton's points."""
+    """A hand placed by a frame (wrist, forward, lateral toward the index side, dorsal). A right
+    hand has (forward x lateral) . dorsal > 0, a left hand < 0. chain()/thumb() give the joint
+    points and the normal of the plane the finger bends in."""
 
     def __init__(self, wrist, fwd, lat, dorsal):
         self.W = _v(*wrist)
@@ -181,361 +201,700 @@ class HandPose:
     def P(self, x, y, z=0.0):
         return self.W + self.f * x + self.l * y + self.dz * z
 
-    def chain(self, name, target=None, curl=0.6):
+    def chain(self, name, target=None, curl=0.6, spread=0.0):
         (bx, by), lens, _ = FINGERS[name]
         B = self.P(bx, by)
-        if target is None:  # relaxed: curled by `curl`
+        if target is None:  # relaxed: curled by `curl`, spread by `spread`
+            fw = _unit(self.f * math.cos(spread) + self.l * math.sin(spread))
+            down = -self.dz
             ang = [curl * 0.6, curl * 1.0, curl * 0.7]
             pts, th, p = [B], 0.0, B
             for L, a in zip(lens, ang):
                 th += a
-                p = p + L * (self.f * math.cos(th) - self.dz * math.sin(th))
+                p = p + L * (fw * math.cos(th) + down * math.sin(th))
                 pts.append(p)
-            return pts
+            return pts, np.cross(fw, down)
         T = _v(*target)
         side = (T - B) - ((T - B) @ self.dz) * self.dz  # abduct toward the target, within reason
         fw = _unit(side) if np.linalg.norm(side) > 1e-6 else self.f
         if fw @ self.f < 0.75:
             fw = _unit(self.f * 0.75 + _unit(fw - (fw @ self.f) * self.f) * 0.66)
         down = _unit(-self.dz - ((-self.dz) @ fw) * fw)
-        return finger_ik(B, fw, down, lens, T)
+        return finger_ik(B, fw, down, lens, T), np.cross(fw, down)
 
     def thumb(self, target=None):
         (bx, by, bz), lens, _ = THUMB
         B = self.P(bx, by, bz)
-        if target is None:
-            T = self.P(0.10, 0.045, -0.04)
-        else:
-            T = _v(*target)
+        T = self.P(0.10, 0.045, -0.04) if target is None else _v(*target)
         fw = _unit(T - B)
         side = _unit(np.cross(fw, self.dz) if abs(fw @ self.dz) < 0.95 else self.l)
         down = _unit(np.cross(side, fw))
         if down @ (-self.dz) < 0:
             down = -down
-        return finger_ik(B, fw, down, lens, T)
+        return finger_ik(B, fw, down, lens, T), np.cross(fw, down)
 
 
-def build(job_path):
-    import bpy  # noqa: I001  (bpy first: it provides bmesh)
+def bone_frames(hp, chains):
+    """Palm + three per finger + three for the thumb: the frames (4x4) that bend the skin. Each
+    frame's y axis keeps the hand's handedness, so rest and pose frames match for left hands too."""
+    F = []
+    M = np.eye(4)
+    M[:3, 0], M[:3, 1], M[:3, 2], M[:3, 3] = hp.f, hp.l, hp.dz, hp.W
+    F.append(M)
+    hand_sign = np.sign(np.dot(np.cross(hp.f, hp.l), hp.dz))
+    for pts, n in chains:
+        for j in range(3):
+            x = _unit(pts[j + 1] - pts[j])
+            z = _unit(np.cross(x, n))
+            y = np.cross(z, x) * hand_sign
+            M = np.eye(4)
+            M[:3, 0], M[:3, 1], M[:3, 2], M[:3, 3] = x, y, z, pts[j]
+            F.append(M)
+    return F
+
+
+def _quat(R):
+    """Unit quaternion (w, x, y, z) of a rotation matrix."""
+    w = math.sqrt(max(0.0, 1 + R[0, 0] + R[1, 1] + R[2, 2])) / 2
+    x = math.copysign(math.sqrt(max(0.0, 1 + R[0, 0] - R[1, 1] - R[2, 2])) / 2, R[2, 1] - R[1, 2])
+    y = math.copysign(math.sqrt(max(0.0, 1 - R[0, 0] + R[1, 1] - R[2, 2])) / 2, R[0, 2] - R[2, 0])
+    z = math.copysign(math.sqrt(max(0.0, 1 - R[0, 0] - R[1, 1] + R[2, 2])) / 2, R[1, 0] - R[0, 1])
+    q = np.array([w, x, y, z])
+    return q / np.linalg.norm(q)
+
+
+def _qmul(a, b):
+    """Quaternion products, broadcasting over leading axes."""
+    w1, x1, y1, z1 = np.moveaxis(a, -1, 0)
+    w2, x2, y2, z2 = np.moveaxis(b, -1, 0)
+    return np.stack([w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2, w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+                     w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2, w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2], -1)
+
+
+def dq_skin(Wt, A, V):
+    """Dual-quaternion skinning: points V (n, 3), weights Wt (n, bones), rigid transforms A (bones, 4, 4).
+    Unlike blending matrices, joints keep their volume when they bend a lot."""
+    qr = np.stack([_quat(a[:3, :3]) for a in A])  # (bones, 4)
+    tq = np.c_[np.zeros(len(A)), A[:, :3, 3]]
+    qd = 0.5 * _qmul(tq, qr)
+    ref = qr[np.argmax(Wt, 1)]  # flip quaternions into the dominant bone's hemisphere
+    sgn = np.sign(np.einsum("bk,nk->nb", qr, ref))
+    sgn[sgn == 0] = 1
+    w = Wt * sgn
+    br, bd = w @ qr, w @ qd
+    nr = np.linalg.norm(br, axis=1, keepdims=True)
+    br, bd = br / nr, bd / nr
+    vq = np.c_[np.zeros(len(V)), V]
+    conj = br * np.array([1, -1, -1, -1])
+    rot = _qmul(_qmul(br, vq), conj)[:, 1:]
+    t = 2 * _qmul(bd, conj)[:, 1:]
+    return rot + t
+
+
+def _seg_dist(P, a, b):
+    ab = b - a
+    u = np.clip(((P - a) @ ab) / (ab @ ab + 1e-12), 0, 1)
+    q = a + u[:, None] * ab
+    return np.linalg.norm(P - q, axis=1), u, q
+
+
+# ---------------------------------------------------------------- Blender side
+class Hand3D:
+    """A hand mesh made once at rest, bent per frame (see the module docstring)."""
+
+    def __init__(self, name, side, mats):
+        import bpy
+        self.bpy = bpy
+        self.side = side
+        lat = (0, 1, 0) if side == "right" else (0, -1, 0)
+        rest = HandPose((0, 0, 0), (1, 0, 0), lat, (0, 0, 1))
+        chains = self.chains(rest, {}, None, curls={k: 0.12 for k in NAMES}, spread=True)
+        sk = self.skin_object(rest, chains)
+        dg = bpy.context.evaluated_depsgraph_get()
+        me = bpy.data.meshes.new_from_object(sk.evaluated_get(dg))
+        bpy.data.objects.remove(sk)
+        self.obj = bpy.data.objects.new(name, me)
+        bpy.context.scene.collection.objects.link(self.obj)
+        me.materials.clear()
+        me.materials.append(mats["skin"])
+        for p in me.polygons:
+            p.use_smooth = True
+        V = np.array([v.co[:] for v in me.vertices], float)
+        self.Vh = np.c_[V, np.ones(len(V))]
+        self.R_inv = [np.linalg.inv(M) for M in bone_frames(rest, chains)]
+        self.weights(V, rest, chains)
+        self.attributes(me, V, rest, chains)
+        self.nails = []
+        for k in range(5):
+            bpy.ops.mesh.primitive_uv_sphere_add(segments=24, ring_count=12, radius=1.0)
+            nl = bpy.context.object
+            nl.data.materials.append(mats["nail"])
+            bpy.ops.object.shade_smooth()
+            self.nails.append(nl)
+        bpy.ops.mesh.primitive_cylinder_add(vertices=48, radius=1.0, depth=1.0)
+        self.sleeve = bpy.context.object
+        dm = self.sleeve.modifiers.new("d", "DISPLACE")
+        tx = bpy.data.textures.new(name + "folds", "CLOUDS")
+        tx.noise_scale = 0.35
+        dm.texture, dm.strength = tx, 0.12
+        self.sleeve.modifiers.new("s", "SUBSURF").render_levels = 2
+        self.sleeve.data.materials.append(mats["sleeve"])
+        bpy.ops.object.shade_smooth()
+
+    @staticmethod
+    def chains(hp, targets, thumb_target, curls=None, spread=False):
+        out = []
+        for k in NAMES:
+            out.append(hp.chain(k, targets.get(k), (curls or {}).get(k, 0.7), SPREAD[k] if spread else 0.0))
+        out.append(hp.thumb(thumb_target))
+        return out
+
+    def skin_object(self, hp, chains):
+        """The rest-pose hand from Blender's skin modifier over the skeleton, smoothed."""
+        bpy = self.bpy
+        pts = [hp.W, hp.P(-0.09, 0, -0.004), hp.P(0.03, 0.02, -0.012)]
+        for k in NAMES:
+            pts.append(hp.P(FINGERS[k][0][0] * 0.5, FINGERS[k][0][1] * 0.8, 0.0))
+        edges = [(0, 1), (0, 2)] + [(0, 3 + k) for k in range(4)]
+        rad = [0.021, 0.027, 0.017] + [0.0145] * 4
+        idx = 7
+
+        def dense(c):
+            o = []
+            for q in range(3):
+                o += [c[q], (c[q] + c[q + 1]) / 2]
+            return o + [c[3]]
+
+        def chain_radii(r0, r1):
+            J = [r0 * 1.02, r0 * 0.95, (r0 + r1) / 2 * 0.99, r1 * 0.97]
+            o = []
+            for q in range(3):
+                o += [J[q], 0.9 * (J[q] + J[q + 1]) / 2]
+            return o + [J[3]]
+        for k, (c, _) in enumerate(chains):
+            pts += dense(c)
+            edges.append((3 + k if k < 4 else 2, idx))
+            edges += [(idx + q, idx + q + 1) for q in range(6)]
+            rad += chain_radii(*(FINGERS[NAMES[k]][2] if k < 4 else THUMB[2]))
+            idx += 7
+        K = 1.55  # the skin hull over a dense skeleton comes out thinner than its radii
+        me = bpy.data.meshes.new("handskel")
+        me.from_pydata([tuple(p) for p in pts], edges, [])
+        o = bpy.data.objects.new("handskel", me)
+        bpy.context.scene.collection.objects.link(o)
+        o.modifiers.new("skin", "SKIN").use_smooth_shade = True
+        for i, r in enumerate(rad):
+            me.skin_vertices[0].data[i].radius = (r * K, r * K * 0.8)
+        me.skin_vertices[0].data[0].use_root = True
+        sub = o.modifiers.new("sub", "SUBSURF")
+        sub.levels = sub.render_levels = 2
+        return o
+
+    def bones(self, hp, chains):
+        """Segments per bone (the palm: several) for the weights, in the rest pose."""
+        palm = [(hp.W, chains[k][0][0]) for k in range(4)] + [(hp.W, hp.P(-0.09, 0, 0)), (hp.W, chains[4][0][0])]
+        segs, owner = [palm], [-1]
+        for k, (c, _) in enumerate(chains):
+            for j in range(3):
+                segs.append([(c[j], c[j + 1])])
+                owner.append(k)
+        return segs, owner
+
+    def weights(self, V, hp, chains):
+        """Skin weights from Blender's bone heat (automatic weights) on an armature whose bones are
+        the palm and the finger and thumb bones; falls back to distance weights if heat fails."""
+        bpy = self.bpy
+        segs, owner = self.bones(hp, chains)
+        arm = bpy.data.armatures.new("rig")
+        ao = bpy.data.objects.new("rig", arm)
+        bpy.context.scene.collection.objects.link(ao)
+        bpy.context.view_layer.objects.active = ao
+        bpy.ops.object.mode_set(mode="EDIT")
+        heads = [hp.W] + [s_[0][0] for s_ in segs[1:]]
+        tails = [(chains[1][0][0] + chains[2][0][0]) / 2] + [s_[0][1] for s_ in segs[1:]]
+        for i, (h, t) in enumerate(zip(heads, tails)):
+            eb = arm.edit_bones.new(f"b{i}")
+            eb.head, eb.tail = tuple(h), tuple(t)
+        bpy.ops.object.mode_set(mode="OBJECT")
+        ob = self.obj
+        for o in bpy.context.scene.objects:
+            o.select_set(False)
+        ob.select_set(True)
+        ao.select_set(True)
+        bpy.context.view_layer.objects.active = ao
+        Wt = np.zeros((len(V), len(segs)))
+        try:
+            bpy.ops.object.parent_set(type="ARMATURE_AUTO")
+            for vg in ob.vertex_groups:
+                b = int(vg.name[1:])
+                for i in range(len(V)):
+                    try:
+                        Wt[i, b] = vg.weight(i)
+                    except RuntimeError:
+                        pass
+        except Exception as e:  # noqa: BLE001
+            print("bone heat failed:", e)
+        if (Wt.sum(1) < 1e-6).mean() > 0.02:  # heat failed for many points: distance weights there
+            D = np.stack([np.min([_seg_dist(V, a, b)[0] for a, b in s_], 0) for s_ in segs], 1)
+            Wd = np.exp(-(D / 0.014) ** 2)
+            bad = Wt.sum(1) < 1e-6
+            Wt[bad] = Wd[bad]
+        Wt[:, 0] += 1e-6
+        self.Wt = Wt / Wt.sum(1, keepdims=True)
+        ob.parent = None
+        for m in list(ob.modifiers):
+            ob.modifiers.remove(m)
+        ob.vertex_groups.clear()
+        bpy.data.objects.remove(ao)
+        ob.matrix_world.identity()
+
+    def attributes(self, me, V, hp, chains):
+        """Rest-surface data for the skin shader."""
+        n = len(V)
+        jd, dors, tip = np.ones(n), np.zeros(n), np.ones(n)
+        best = np.full(n, 1e9)
+        for c, nrm in chains:
+            L = [np.linalg.norm(c[j + 1] - c[j]) for j in range(3)]
+            arc = [0.0, L[0], L[0] + L[1], L[0] + L[1] + L[2]]
+            for j in range(3):
+                d, u, q = _seg_dist(V, c[j], c[j + 1])
+                m = d < best
+                best[m] = d[m]
+                s = arc[j] + u * L[j]
+                jd[m] = np.min(np.abs(s[m, None] - np.array(arc[:3])[None, :]), 1)
+                x = _unit(c[j + 1] - c[j])
+                z = _unit(np.cross(x, nrm))
+                r = V[m] - q[m]
+                dors[m] = (r @ z) / (np.linalg.norm(r, axis=1) + 1e-9)
+                tip[m] = np.linalg.norm(V[m] - c[3], axis=1)
+        palm = best > 0.022
+        jd[palm], tip[palm] = 1.0, 1.0
+        dors[palm] = np.clip((V[palm] - hp.W) @ hp.dz / 0.012, -1, 1)
+        for nm, arr in (("jd", jd), ("dors", dors), ("tip", tip)):
+            a = me.attributes.new(nm, "FLOAT", "POINT")
+            a.data.foreach_set("value", arr.astype(np.float32))
+        a = me.attributes.new("rest", "FLOAT_VECTOR", "POINT")
+        a.data.foreach_set("vector", V.reshape(-1).astype(np.float32))
+
+    def pose(self, hp, targets, thumb_target=None, curls=None):
+        from mathutils import Matrix, Vector
+        chains = self.chains(hp, targets, thumb_target, curls)
+        A = np.stack([M @ Ri for M, Ri in zip(bone_frames(hp, chains), self.R_inv)])  # (bones, 4, 4)
+        P = dq_skin(self.Wt, A, self.Vh[:, :3])
+        me = self.obj.data
+        me.vertices.foreach_set("co", P.reshape(-1).astype(np.float32))
+        me.update()
+        for nl, (c, nrm), r in zip(self.nails, chains, [FINGERS[k][2][1] * 0.95 for k in NAMES] + [THUMB[2][1] * 0.95]):
+            d = _unit(c[3] - c[2])
+            up = _unit(np.cross(d, nrm))
+            side = np.cross(up, d)
+            ctr = c[3] - d * r * 0.4 + up * r * 0.74
+            R = Matrix(((d[0], side[0], up[0]), (d[1], side[1], up[1]), (d[2], side[2], up[2])))
+            nl.matrix_world = Matrix.Translation(Vector(ctr)) @ R.to_4x4() @ Matrix.Diagonal((r * 0.95, r * 0.72, r * 0.16, 1))
+        a, bb = hp.W - hp.f * 0.03, hp.W - hp.f * 0.42
+        q = Vector((0, 0, 1)).rotation_difference(Vector(_unit(a - bb)))
+        self.sleeve.matrix_world = Matrix.Translation(Vector((a + bb) / 2)) @ q.to_matrix().to_4x4() @ Matrix.Diagonal((0.05, 0.047, 0.39, 1))
+        return chains
+
+
+def hand_materials(job):
+    import blendkit as bk
+    skin = np.array(job["skin"]) * 0.6
+    m, n, b = bk.material("skin", tuple(skin), 0.45)
+    b.inputs["Subsurface Weight"].default_value = 0.6
+    b.inputs["Subsurface Radius"].default_value = (1.0, 0.25, 0.12)
+    b.inputs["Subsurface Scale"].default_value = 0.005
+    b.inputs["Coat Weight"].default_value = 0.08
+    b.inputs["Coat Roughness"].default_value = 0.35
+    attr = lambda nm, out="Fac": n.node("ShaderNodeAttribute", props=dict(attribute_name=nm)).outputs[out]  # noqa: E731
+    rest = attr("rest", "Vector")
+    jd, dors, tip = attr("jd"), attr("dors"), attr("tip")
+    wob = n.math("MULTIPLY", n.math("SUBTRACT", n.node("ShaderNodeTexNoise", Vector=rest, Scale=700.0).outputs[0], 0.5), 0.0006)
+    jdw = n.math("ADD", jd, wob)
+    near = lambda w: n.math("EXPONENT", n.math("MULTIPLY", n.math("POWER", n.math("DIVIDE", jdw, w), 2.0), -1.0))  # noqa: E731
+    back = n.math("MAXIMUM", dors, 0.0)
+    front = n.math("MAXIMUM", n.math("MULTIPLY", dors, -1.0), 0.0)
+    rings = n.math("ADD", n.math("MULTIPLY", n.math("SINE", n.math("MULTIPLY", jdw, 2 * math.pi / 0.0011)), 0.5), 0.5)
+    wrinkles = n.math("MULTIPLY", n.math("MULTIPLY", rings, near(0.0038)), back)
+    crease = n.math("MULTIPLY", near(0.0007), front)
+    pores = n.node("ShaderNodeTexNoise", Vector=rest, Scale=2600.0, Detail=3.0).outputs[0]
+    fine = n.node("ShaderNodeTexVoronoi", Vector=rest, Scale=900.0, props=dict(feature="DISTANCE_TO_EDGE")).outputs[0]
+    h = n.math("ADD", n.math("ADD", n.math("MULTIPLY", wrinkles, -0.8), n.math("MULTIPLY", crease, -1.2)),
+               n.math("ADD", n.math("MULTIPLY", pores, 0.25), n.math("MULTIPLY", fine, 0.15)))
+    n.set(b.inputs["Normal"], n.node("ShaderNodeBump", Strength=0.6, Distance=0.0004, Height=h).outputs[0])
+    red = n.math("MINIMUM", n.math("ADD", n.math("MULTIPLY", near(0.006), n.math("ADD", back, 0.3)),
+                                   n.math("EXPONENT", n.math("MULTIPLY", n.math("POWER", n.math("DIVIDE", tip, 0.014), 2.0), -1.0))), 1.0)
+    mott = n.node("ShaderNodeTexNoise", Vector=rest, Scale=90.0, Detail=4.0).outputs[0]
+    mix = n.node("ShaderNodeMix", Factor=n.math("MULTIPLY", red, 0.7), props=dict(data_type="RGBA"))
+    n.set(mix.inputs[6], n.ramp(mott, [(0.35, tuple(skin * 0.93)), (0.65, tuple(skin * 1.06))]))
+    mix.inputs[7].default_value = (*(skin * np.array([1.12, 0.72, 0.68])), 1)
+    n.set(b.inputs["Base Color"], mix.outputs[2])
+    n.set(b.inputs["Roughness"], n.math("ADD", 0.38, n.math("MULTIPLY", mott, 0.18)))
+    nail, nn, nb = bk.material("nail", tuple(np.clip(skin * np.array([1.1, 0.88, 0.88]) + 0.08, 0, 1)), 0.18)
+    nb.inputs["Coat Weight"].default_value = 1.0
+    nb.inputs["Coat Roughness"].default_value = 0.08
+    gx = nn.xyz(nn.node("ShaderNodeTexCoord").outputs["Generated"])[0]
+    nn.set(nb.inputs["Base Color"], nn.ramp(gx, [(0.25, tuple(skin * np.array([1.0, 0.75, 0.75]) + 0.05)), (0.62, tuple(skin * 1.1 + 0.08)),
+                                                 (0.8, (0.85, 0.82, 0.78))]))
+    cloth, n2, b2 = bk.material("sleeve", tuple(job["sleeve"]), 0.85)
+    b2.inputs["Sheen Weight"].default_value = 0.6
+    weave = n2.node("ShaderNodeTexWave", Vector=n2.node("ShaderNodeTexCoord").outputs["Object"], Scale=180.0)
+    n2.set(b2.inputs["Normal"], n2.node("ShaderNodeBump", Strength=0.15, Height=weave.outputs[1]).outputs[0])
+    return dict(skin=m, nail=nail, sleeve=cloth)
+
+
+def lights(preset, tgt):
+    import blendkit as bk
+    if preset == "fire":
+        bk.light("AREA", (tgt.x - 0.1, tgt.y - 0.6, tgt.z - 0.25), 60, (1.0, 0.45, 0.13), size=0.5, target=tgt)
+        bk.light("AREA", (tgt.x + 0.2, tgt.y + 0.5, tgt.z + 0.6), 25, (0.55, 0.65, 1.0), size=0.6, target=tgt)
+        bk.world(0.03, (0.05, 0.06, 0.12))
+    elif preset == "sunset":
+        bk.light("AREA", (tgt.x - 0.9, tgt.y - 0.3, tgt.z + 0.15), 70, (1.0, 0.6, 0.3), size=0.6, target=tgt)
+        bk.light("AREA", (tgt.x + 0.3, tgt.y + 0.4, tgt.z + 0.8), 30, (0.5, 0.62, 1.0), size=1.0, target=tgt)
+        bk.world(0.15, (0.35, 0.4, 0.6))
+    else:  # stage
+        bk.light("AREA", (tgt.x - 0.5, tgt.y + 0.5, tgt.z + 0.5), 70, (1.0, 0.3, 0.6), size=0.4, target=tgt)
+        bk.light("AREA", (tgt.x + 0.5, tgt.y - 0.5, tgt.z + 0.4), 70, (0.3, 0.5, 1.0), size=0.4, target=tgt)
+        bk.light("AREA", (tgt.x, tgt.y - 0.4, tgt.z + 0.7), 40, (1, 1, 1), size=0.6, target=tgt)
+        bk.world(0.02)
+
+
+def eased(fn, t, w=0.12):
+    return float(np.mean([fn(t + d) for d in np.linspace(-w, 0.04, 7)]))
+
+
+def smooth(u):
+    u = min(1.0, max(0.0, u))
+    return u * u * (3 - 2 * u)
+
+
+# ---------------------------------------------------------------- strings, pick, sticks
+class Strings:
+    """Strings as real tubes (wound ones with windings) from the bridge to the nut; they shake."""
+
+    def __init__(self, sp, g):
+        import bpy  # noqa: I001
+        import bmesh
+        import blendkit as bk
+        M = 0.01
+        n, top, nut, bx = g["n"], g["top"], g["nut"], g["bx"]
+        self.n, self.nut, self.bx, self.frets, self.M = n, nut, bx, g["frets"], M
+        self.z_nut = (top + 1.25) * M
+        self.z_br = (top + (1.25 if n == 4 else 1.95)) * M
+        self.sp_br = 1.5 if n == 4 else 1.05
+        self.sp_nut = (g["w_nut"] - 0.8) / (n - 1)
+        gauges = [0.105, 0.085, 0.065, 0.045] if n == 4 else [0.046, 0.036, 0.026, 0.017, 0.013, 0.010]
+        self.S = []
+        for i in range(n):
+            wound = gauges[i] > 0.02
+            m, nd, b = bk.material(f"str{i}", (0.72, 0.7, 0.66), 0.25 if wound else 0.15, 1.0)
+            if wound:
+                tc = nd.node("ShaderNodeTexCoord").outputs["Object"]
+                wv = nd.node("ShaderNodeTexWave", Vector=tc, Scale=900.0 / max(gauges[i], 0.03), Distortion=0.0, props=dict(bands_direction="X"))
+                nd.set(b.inputs["Normal"], nd.node("ShaderNodeBump", Strength=0.6, Height=wv.outputs[1]).outputs[0])
+            bm = bmesh.new()
+            segs, sides = 160, 10
+            r = gauges[i] / 2 * M
+            rings = []
+            for k in range(segs + 1):
+                x = bx + (nut - bx) * k / segs
+                rings.append([bm.verts.new((x * M, self.y(i, x) + r * math.cos(2 * math.pi * q / sides), self.z(x) + r * math.sin(2 * math.pi * q / sides)))
+                              for q in range(sides)])
+            for k in range(segs):
+                for q in range(sides):
+                    bm.faces.new((rings[k][q], rings[k][(q + 1) % sides], rings[k + 1][(q + 1) % sides], rings[k + 1][q]))
+            me = bpy.data.meshes.new(f"s{i}")
+            bm.to_mesh(me)
+            bm.free()
+            o = bpy.data.objects.new(f"s{i}", me)
+            bpy.context.scene.collection.objects.link(o)
+            me.materials.append(m)
+            for p in me.polygons:
+                p.use_smooth = True
+            self.S.append(dict(me=me, base=np.array([v.co[:] for v in me.vertices])))
+
+    def y(self, i, x):  # string i (0 = lowest) across the neck at x (cm): bass side is +y
+        k = (x - self.bx) / (self.nut - self.bx)
+        return ((self.n - 1) / 2 - i) * (self.sp_br * (1 - k) + self.sp_nut * k) * self.M
+
+    def z(self, x):
+        k = (x - self.bx) / (self.nut - self.bx)
+        return self.z_br * (1 - k) + self.z_nut * k
+
+    def shake(self, fi, ringing):
+        """ringing: {string: (age s, fret)}."""
+        M = self.M
+        for i, S in enumerate(self.S):
+            co = S["base"].copy()
+            if i in ringing:
+                age, f = ringing[i]
+                amp = (0.0016 if self.n == 4 else 0.0008) * math.exp(-age / 0.5) * (1 if fi % 2 else -1)
+                xs = co[:, 0] / M
+                xstop = self.frets[f] if f > 0 else self.nut
+                uu = np.clip((xs - self.bx) / (xstop - self.bx), 0, 1)
+                co[:, 2] += amp * np.sin(np.pi * uu) * (xs <= xstop)
+            S["me"].vertices.foreach_set("co", co.reshape(-1).astype(np.float32))
+            S["me"].update()
+
+
+def _mesh_obj(name, bm, mat, smooth_=True):
+    import bpy
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    o = bpy.data.objects.new(name, me)
+    bpy.context.scene.collection.objects.link(o)
+    me.materials.append(mat)
+    for p in me.polygons:
+        p.use_smooth = smooth_
+    return o
+
+
+def _pick(mat):
+    """A guitar pick: a rounded triangle, thin, in its local xy plane."""
+    import bpy  # noqa: F401,I001
     import bmesh
+    bm = bmesh.new()
+    th = np.linspace(0, 2 * np.pi, 48, endpoint=False)
+    r = 0.0125 * (1 + 0.22 * np.cos(3 * th))
+    top = [bm.verts.new((float(r_ * math.cos(a)), float(r_ * math.sin(a)), 0.0004)) for r_, a in zip(r, th)]
+    bot = [bm.verts.new((float(r_ * math.cos(a)), float(r_ * math.sin(a)), -0.0004)) for r_, a in zip(r, th)]
+    bm.faces.new(top)
+    bm.faces.new(bot[::-1])
+    for i in range(len(th)):
+        bm.faces.new((top[i], bot[i], bot[(i + 1) % len(th)], top[(i + 1) % len(th)]))
+    return _mesh_obj("pick", bm, mat, smooth_=False)
+
+
+def _stick(mat):
+    """A drumstick along local +z from its butt (0) to its tip (0.41 m): tapered, a bead at the tip."""
+    import bpy  # noqa: F401,I001
+    import bmesh
+    bm = bmesh.new()
+    sides = 16
+    prof = [(0.0, 0.0072), (0.28, 0.0072), (0.37, 0.0042), (0.395, 0.0028), (0.40, 0.0045), (0.408, 0.0040), (0.41, 0.0005)]
+    rings = [[bm.verts.new((r * math.cos(2 * math.pi * q / sides), r * math.sin(2 * math.pi * q / sides), z)) for q in range(sides)] for z, r in prof]
+    for k in range(len(rings) - 1):
+        for q in range(sides):
+            bm.faces.new((rings[k][q], rings[k][(q + 1) % sides], rings[k + 1][(q + 1) % sides], rings[k + 1][q]))
+    bm.faces.new(rings[0][::-1])
+    return _mesh_obj("stick", bm, mat), 0.41
+
+
+def _place_along(obj, a, b):
+    """Put an object whose local +z runs along its length so that it starts at a and points to b."""
+    from mathutils import Matrix, Vector
+    q = Vector((0, 0, 1)).rotation_difference(Vector(_unit(b - a)))
+    obj.matrix_world = Matrix.Translation(Vector(a)) @ q.to_matrix().to_4x4()
+
+
+# ---------------------------------------------------------------- build
+def build(job_path):
+    import bpy
     from mathutils import Matrix, Vector
 
     import blendkit as bk
-    import guitar3d
 
     job = json.load(open(job_path))
     out = os.path.dirname(job_path)
-    sp = json.load(open(guitar3d.spec_path(job["model"])))
-    M = 0.01
     sc = bk.scene(tuple(job["res"]), job["samples"], transparent=True)
     sc.view_settings.view_transform = "AgX"
     sc.view_settings.look = "AgX - Medium High Contrast"
     sc.render.image_settings.file_format = "PNG"
     sc.render.image_settings.color_depth = "8"
-    sc.cycles.use_denoising = True
-    g = guitar3d.model(sp, sc)
-    n, top, nut, bx = g["n"], g["top"], g["nut"], g["bx"]
-    frets = g["frets"]
-    rng = np.random.default_rng(job["seed"])
-
-    # ---- strings: tubes from the bridge saddles to the nut, wound ones with windings
-    z_nut = (top + 1.25) * M
-    z_br = (top + (1.25 if n == 4 else 1.95)) * M
-    sp_br = 1.5 if n == 4 else 1.05
-    sp_nut = (g["w_nut"] - 0.8) / (n - 1)
-
-    def sy(i, x):  # string i (0 = lowest) across the neck at x (cm): bass side is +y
-        k = (x - bx) / (nut - bx)
-        return ((n - 1) / 2 - i) * (sp_br * (1 - k) + sp_nut * k) * M
-
-    def sz(x):
-        k = (x - bx) / (nut - bx)
-        return z_br * (1 - k) + z_nut * k
-
-    gauges = [0.105, 0.085, 0.065, 0.045] if n == 4 else [0.046, 0.036, 0.026, 0.017, 0.013, 0.010]
-    strings = []
-    for i in range(n):
-        wound = gauges[i] > 0.02
-        m, nd, b = bk.material(f"str{i}", (0.72, 0.7, 0.66), 0.25 if wound else 0.15, 1.0)
-        if wound:
-            tc = nd.node("ShaderNodeTexCoord").outputs["Object"]
-            wv = nd.node("ShaderNodeTexWave", Vector=tc, Scale=900.0 / max(gauges[i], 0.03), Distortion=0.0, props=dict(bands_direction="X"))
-            nd.set(b.inputs["Normal"], nd.node("ShaderNodeBump", Strength=0.6, Height=wv.outputs[1]).outputs[0])
-        bm = bmesh.new()
-        segs, sides = 160, 10
-        r = gauges[i] / 2 * M
-        rings, us = [], []
-        for k in range(segs + 1):
-            u = k / segs
-            x = bx + (nut - bx) * u
-            rings.append([bm.verts.new((x * M, sy(i, x) + r * math.cos(2 * math.pi * q / sides), sz(x) + r * math.sin(2 * math.pi * q / sides)))
-                          for q in range(sides)])
-            us.append(u)
-        for k in range(segs):
-            for q in range(sides):
-                bm.faces.new((rings[k][q], rings[k][(q + 1) % sides], rings[k + 1][(q + 1) % sides], rings[k + 1][q]))
-        me = bpy.data.meshes.new(f"s{i}")
-        bm.to_mesh(me)
-        bm.free()
-        o = bpy.data.objects.new(f"s{i}", me)
-        sc.collection.objects.link(o)
-        me.materials.append(m)
-        for p in me.polygons:
-            p.use_smooth = True
-        base = np.array([v.co[:] for v in me.vertices])
-        uu = np.repeat(np.array(us), sides)
-        strings.append(dict(me=me, base=base, u=uu))
-
-    # ---- hands: skin-modifier skeletons
-    skin = np.array(job["skin"]) * 0.6
-    skin_m, nd, b = bk.material("skin", tuple(skin), 0.45)
-    pt = nd.node("ShaderNodeNewGeometry").outputs["Pointiness"]
-    nd.set(b.inputs["Base Color"], nd.ramp(pt, [(0.46, tuple(skin)), (0.56, tuple(skin * np.array([1.08, 0.78, 0.74])))]))
-    b.inputs["Subsurface Weight"].default_value = 0.35
-    b.inputs["Subsurface Radius"].default_value = (1.0, 0.35, 0.2)
-    b.inputs["Subsurface Scale"].default_value = 0.01
-    tcs = nd.node("ShaderNodeTexCoord").outputs["Object"]
-    pores = nd.node("ShaderNodeTexNoise", Vector=tcs, Scale=900.0, Detail=4.0)
-    creases = nd.node("ShaderNodeTexVoronoi", Vector=tcs, Scale=260.0, props=dict(feature="DISTANCE_TO_EDGE"))
-    nd.set(b.inputs["Normal"], nd.node("ShaderNodeBump", Strength=0.12, Height=nd.math("ADD", pores.outputs[0], nd.math("MULTIPLY", creases.outputs[0], 0.6))).outputs[0])
-    nail_m, _, nb_ = bk.material("nail", tuple(min(1.0, c * 1.25 + 0.06) for c in job["skin"]), 0.2)
-    nb_.inputs["Coat Weight"].default_value = 0.6
-    cloth_m, nd2, b2 = bk.material("sleeve", tuple(job["sleeve"]), 0.85)
-    b2.inputs["Sheen Weight"].default_value = 0.6
-    weave = nd2.node("ShaderNodeTexWave", Vector=nd2.node("ShaderNodeTexCoord").outputs["Object"], Scale=180.0)
-    nd2.set(b2.inputs["Normal"], nd2.node("ShaderNodeBump", Strength=0.15, Height=weave.outputs[1]).outputs[0])
-
-    names = ["index", "middle", "ring", "pinky"]
-
-    CH = 7  # points per finger: knuckle, mid, joint, mid, joint, mid, tip
-
-    def skeleton_edges():
-        """Vertex order: wrist, forearm, thenar, palm mids x4, then each finger's 7 points, the thumb's 7."""
-        edges = [(0, 1), (0, 2)]
-        idx = 3
-        mids = []
-        for _ in names:
-            edges.append((0, idx))
-            mids.append(idx)
-            idx += 1
-        for k in range(4):
-            c = list(range(idx, idx + CH))
-            edges.append((mids[k], c[0]))
-            edges += [(c[q], c[q + 1]) for q in range(CH - 1)]
-            idx += CH
-        th = list(range(idx, idx + CH))
-        edges.append((2, th[0]))
-        edges += [(th[q], th[q + 1]) for q in range(CH - 1)]
-        idx += CH
-        return edges, idx
-
-    EDGES, NV = skeleton_edges()
-
-    def chain_radii(r0, r1):
-        J = [r0 * 1.02, r0 * 0.95, (r0 + r1) / 2 * 0.99, r1 * 0.97]  # joints a little fuller than the bones between
-        out = []
-        for q in range(3):
-            out += [J[q], 0.9 * (J[q] + J[q + 1]) / 2]
-        return out + [J[3]]
-
-    def radii():
-        K = 1.55  # the skin hull over a dense skeleton comes out thinner than its radii
-        r = [0.021 * K, 0.027 * K, 0.017 * K] + [0.0145 * K] * 4
-        for k in names:
-            r += chain_radii(*[v * K for v in FINGERS[k][2]])
-        r += chain_radii(*[v * K for v in THUMB[2]])
-        return r
-
-    RAD = radii()
-
-    def make_hand(nm):
-        me = bpy.data.meshes.new(nm)
-        me.from_pydata([(0, 0, 0)] * NV, EDGES, [])
-        o = bpy.data.objects.new(nm, me)
-        sc.collection.objects.link(o)
-        sk = o.modifiers.new("skin", "SKIN")
-        sk.use_smooth_shade = True
-        for i, r in enumerate(RAD):
-            me.skin_vertices[0].data[i].radius = (r, r * 0.8)
-        me.skin_vertices[0].data[0].use_root = True
-        sub = o.modifiers.new("sub", "SUBSURF")
-        sub.levels = sub.render_levels = 2
-        me.materials.append(skin_m)
-        nails = []
-        for k in range(5):
-            bpy.ops.mesh.primitive_uv_sphere_add(segments=16, ring_count=8, radius=1.0)
-            nl = bpy.context.object
-            nl.data.materials.append(nail_m)
-            bpy.ops.object.shade_smooth()
-            nails.append(nl)
-        bpy.ops.mesh.primitive_cylinder_add(vertices=40, radius=1.0, depth=1.0)
-        sl = bpy.context.object
-        dm = sl.modifiers.new("d", "DISPLACE")
-        tx = bpy.data.textures.new(nm + "folds", "CLOUDS")
-        tx.noise_scale = 0.35
-        dm.texture, dm.strength = tx, 0.12
-        sl.modifiers.new("s", "SUBSURF").render_levels = 2
-        sl.data.materials.append(cloth_m)
-        bpy.ops.object.shade_smooth()
-        return dict(o=o, me=me, nails=nails, sleeve=sl)
-
-    def pose_hand(h, hp, targets, thumb_target=None, curls=None):
-        pts = [hp.W, hp.P(-0.09, 0, -0.004), hp.P(0.03, 0.02, -0.012)]
-        chains = []
-        for k in names:
-            pts.append(hp.P(FINGERS[k][0][0] * 0.5, FINGERS[k][0][1] * 0.8, 0.0))
-
-        def dense(c):
-            out = []
-            for q in range(3):
-                out += [c[q], (c[q] + c[q + 1]) / 2]
-            return out + [c[3]]
-        for k in names:
-            c = hp.chain(k, targets.get(k), (curls or {}).get(k, 0.7))
-            chains.append(c)
-            pts += dense(c)
-        tc = hp.thumb(thumb_target)
-        chains.append(tc)
-        pts += dense(tc)
-        co = np.array(pts, float).reshape(-1)
-        h["me"].vertices.foreach_set("co", co.astype(np.float32))
-        h["me"].update()
-        for nl, c, r in zip(h["nails"], chains, [FINGERS[k][2][1] * 0.95 for k in names] + [THUMB[2][1] * 0.95]):
-            d = _unit(c[3] - c[2])
-            up = hp.dz - (hp.dz @ d) * d
-            up = _unit(up) if np.linalg.norm(up) > 1e-6 else hp.dz
-            side = np.cross(up, d)
-            ctr = c[3] - d * r * 0.4 + up * r * 0.74
-            R = Matrix(((d[0], side[0], up[0]), (d[1], side[1], up[1]), (d[2], side[2], up[2])))
-            nl.matrix_world = Matrix.Translation(Vector(ctr)) @ R.to_4x4() @ Matrix.Diagonal((r * 0.95, r * 0.72, r * 0.16, 1))
-        # the sleeve: from just behind the wrist back along the forearm
-        f = hp.f
-        a = hp.W - f * 0.03
-        bb = hp.W - f * 0.42
-        d = _unit(a - bb)
-        z = Vector((0, 0, 1))
-        q = z.rotation_difference(Vector(d))
-        h["sleeve"].matrix_world = Matrix.Translation(Vector((a + bb) / 2)) @ q.to_matrix().to_4x4() @ Matrix.Diagonal((0.05, 0.047, 0.39, 1))
-
-    hand = make_hand("hand")
-
-    # ---- the notes in this shot
-    notes = [tuple(x) for x in job["notes"]]
+    mats = hand_materials(job)
+    kind = job["kind"]
     t0, t1 = job["t0"], job["t1"]
     nfr = max(1, int(round((t1 - t0) * FPS)))
-    fret_mid = lambda f: (nut - g["scale_l"] * (1 - 2 ** (-(f - 0.3) / 12))) if f > 0 else nut - 1.0  # noqa: E731  cm, just behind fret f (f may be fractional)
-    Z_TIP = lambda x: sz(x) + 0.004  # noqa: E731
+    M = 0.01
 
-    def note_at(t):
-        past = [nt for nt in notes if nt[0] <= t + 1e-3]
-        return past[-1] if past else (notes[0] if notes else (t, 0, 3))
+    if job.get("family") == "kit":
+        import kit3d
+        km = kit3d.model(json.load(open(kit3d.spec_path(job["model"]))), sc)
+        P, groups = km["P"], km["groups"]
+        hk = "hat" if "hat" in P else "hihat"
+        sn, hat = groups["snare"], groups[hk]
+        bpy.context.view_layer.update()
+        up_s = np.array(sn.matrix_world.to_3x3() @ Vector((0, 0, 1))).copy()
+        up_s /= np.linalg.norm(up_s)
+        sn_top = np.array(sn.matrix_world @ Vector((0, 0, P["snare"]["depth"] / 2 * M + 0.004)))
+        R_s = P["snare"]["diameter"] / 2 * M
+        R_h = P[hk]["diameter"] / 2 * M
+        hat_c = np.array(hat.matrix_world.translation)
+        toward = np.array([0.0, 1.0, 0.0])  # the drummer sits at +y
+        spot_l = sn_top + toward * (0.25 * R_s) + np.array([0.08 * R_s, 0, 0])
+        spot_r = hat_c + toward * (0.55 * R_h) + np.array([0, 0, 0.006])
+        hat_rot0 = hat.rotation_euler.copy()
+        wood, _, wb = bk.material("hickory", (0.62, 0.46, 0.28), 0.4)
+        wb.inputs["Coat Weight"].default_value = 0.5
+        sticks = {s: _stick(wood) for s in ("l", "r")}
+        hands = {"l": Hand3D("hand_l", "left", mats), "r": Hand3D("hand_r", "right", mats)}
+        hits = [tuple(h) for h in job["notes"]]
+        side_hits = {"l": [t for t, p in hits if p in LEFT_DRUMS], "r": [t for t, p in hits if p in RIGHT_DRUMS]}
+        cam_tgt = Vector((spot_l + spot_r) / 2 + np.array([0, 0.05, 0.04]))
+        cam = bk.camera(cam_tgt + Vector((-0.28, 0.72, 0.66)), cam_tgt, 32, dof=(0.95, 3.2))  # over the drummer's shoulder
+        lights(job["light"], cam_tgt)
 
-    def hand_fret(t):
-        """Where the fretting hand sits (fret number of the index finger), eased."""
-        fr = [f for (tt, s, f) in notes if f > 0 and tt <= t + 0.08]
-        p = fr[-1] if fr else next((f for (tt, s, f) in notes if f > 0), 3)
-        return max(1, p - 1) if p > 1 else 1
+        def height(ts, t, H=0.13):
+            past = [x for x in ts if x <= t]
+            fut = [x for x in ts if x > t]
+            up = 1.0 if not past else 1 - math.exp(-(t - past[-1]) / 0.05)
+            down = 1.0 if not fut else min(1.0, (fut[0] - t) / 0.11) ** 0.85
+            return H * min(up, down)
 
-    def eased(fn, t, w=0.12):
-        return float(np.mean([fn(t + d) for d in np.linspace(-w, 0.04, 7)]))
-
-    # ---- camera, lights
-    light = job["light"]
-    if job["kind"] == "fret":
-        pos0 = eased(hand_fret, t0 + (t1 - t0) / 2)
-        cx = fret_mid(int(round(pos0)) + 1) * M
-        tgt = Vector((cx, 0.0, z_nut))
-        tgt = Vector((cx, -0.01, z_nut + 0.01))
-        cam = bk.camera((cx + 0.10, -0.17, z_nut + 0.30), tgt, 50, dof=(0.36, 2.4))
+        def frame_fn(fi, t):
+            for s in ("l", "r"):
+                spot = spot_l if s == "l" else spot_r
+                h = height(side_hits[s], t)
+                Tp = spot + up_s * h
+                F = spot + toward * 0.29 + np.array([(-0.05 if s == "l" else 0.06), 0.0, 0.10 + 0.25 * h])
+                d = _unit(Tp - F)
+                stick, L = sticks[s]
+                _place_along(stick, Tp - d * L, Tp)
+                f = _unit(np.array([d[0], d[1], 0.0]) + np.array([0, 0, -0.25]))
+                dz = _unit(np.array([0, 0, 1.0]) - f * f[2])
+                lat = np.cross(dz, f) if s == "r" else np.cross(f, dz)
+                hp = HandPose(F - f * 0.088 + dz * 0.028, f, lat, dz)
+                targets = {nm: F - d * (0.006 + 0.017 * k) - dz * 0.011 - hp.l * 0.006 for k, nm in enumerate(NAMES)}
+                hands[s].pose(hp, targets, F + dz * 0.009 + hp.l * 0.007)
+            past = [x for x in side_hits["r"] if x <= t]  # the hat shivers when hit
+            a = 0.0 if not past else 0.05 * math.exp(-(t - past[-1]) / 0.25) * math.cos((t - past[-1]) * 40)
+            hat.rotation_euler = (hat_rot0[0] + a, hat_rot0[1], hat_rot0[2])
     else:
-        cx = sp["strum_x"] * M
-        tgt = Vector((cx, 0.0, z_br))
-        cam = bk.camera((cx - 0.16, -0.24, z_br + 0.20), tgt, 50, dof=(0.36, 2.4))
-    cam.rotation_euler.rotate_axis("Z", math.radians(-12 if job["kind"] == "fret" else 10))  # a tilted, Gorillaz-like frame
+        import guitar3d
+        sp = json.load(open(guitar3d.spec_path(job["model"])))
+        g = guitar3d.model(sp, sc)
+        st = Strings(sp, g)
+        n, nut = g["n"], g["nut"]
+        notes = [tuple(x) for x in job["notes"]]
+        strums = [tuple(x) for x in job.get("strums", [])]
+        fret_mid = lambda f: (nut - g["scale_l"] * (1 - 2 ** (-(f - 0.3) / 12))) if f > 0 else nut - 1.0  # noqa: E731
+
+        def note_at(t):
+            past = [nt for nt in notes if nt[0] <= t + 1e-3]
+            return past[-1] if past else (notes[0] if notes else (t, 0, 3))
+
+        def hand_fret(t):
+            fr = [f for (tt, s, f) in notes if f > 0 and tt <= t + 0.08]
+            p = fr[-1] if fr else next((f for (tt, s, f) in notes if f > 0), 3)
+            return max(1, p - 1) if p > 1 else 1
+
+        if kind == "fret":
+            pos0 = eased(hand_fret, t0 + (t1 - t0) / 2)
+            cx = fret_mid(int(round(pos0)) + 1) * M
+            cam_tgt = Vector((cx, -0.01, st.z_nut + 0.01))
+            cam = bk.camera((cx + 0.10, -0.17, st.z_nut + 0.30), cam_tgt, 50, dof=(0.36, 2.4))
+            hand = Hand3D("hand", "left", mats)
+        else:
+            cx = sp["strum_x"] * M
+            cam_tgt = Vector((cx, 0.0, st.z_br))
+            if kind == "pick":
+                cam_tgt = Vector((cx, -0.005, st.z_br + 0.035))
+                cam = bk.camera((cx - 0.13, -0.32, st.z_br + 0.22), cam_tgt, 50, dof=(0.38, 2.6))
+                pk_m, _, pkb = bk.material("pick", (0.02, 0.02, 0.02), 0.25)
+                pkb.inputs["Coat Weight"].default_value = 0.8
+                pick = _pick(pk_m)
+            else:
+                cam = bk.camera((cx - 0.16, -0.24, st.z_br + 0.20), cam_tgt, 50, dof=(0.36, 2.4))
+            hand = Hand3D("hand", "right", mats)
+        lights(job["light"], cam_tgt)
+
+        def frame_fn(fi, t):
+            nt = note_at(t)
+            ringing = {}
+            if kind == "pick":
+                past = [s_ for s_ in strums if s_[0] <= t]
+                if past:
+                    ringing = {i: (t - past[-1][0], 0) for i in range(n)}
+            elif nt and 0 <= t - nt[0] < 1.5:
+                ringing = {nt[1]: (t - nt[0], nt[2])}
+            st.shake(fi, ringing)
+            if kind == "fret":
+                p = eased(hand_fret, t)
+                xi = lambda k: fret_mid(int(round(p)) + k) * M  # noqa: E731  index -> pinky, one fret each
+                hp = HandPose((xi(1.5) - 0.015, -0.068, st.z_nut - 0.085), (0.0, 0.42, 0.91), (1.0, 0.0, 0.0), (0.0, -0.91, 0.42))
+                targets = {}
+                act = nt if (nt and t - nt[0] < 0.6) else None
+                for k, nm in enumerate(NAMES):
+                    x = xi(k)
+                    pressed = act is not None and act[2] > 0 and int(round(act[2] - p)) == k
+                    s_ = act[1] if pressed else min(n - 1, 1 + k // 2)
+                    targets[nm] = (x, st.y(s_, x / M) - (0.0 if pressed else 0.004), st.z(x / M) + 0.004 + (0.0 if pressed else 0.014 + 0.004 * k))
+                hand.pose(hp, targets, (xi(1) + 0.004, 0.004, (g["T"] - 1.2) * M - 0.009))
+            elif kind == "pluck":
+                plucks = [nt_ for nt_ in notes if nt_[0] <= t + 0.07]
+                hp = HandPose((cx + 0.03, 0.075, st.z_br + 0.115), (-0.1, -0.5, -0.86), (1.0, -0.1, 0.0), (0.0, -0.86, 0.5))
+                targets = {}
+                for k, nm in enumerate(("index", "middle")):
+                    mine = [nt_ for j, nt_ in enumerate(plucks) if j % 2 == k]
+                    x = cx + (0.012 if k == 0 else -0.004)
+                    if mine:
+                        tn, s_, _ = mine[-1]
+                        u = t - tn
+                        ys = st.y(s_, x / M)
+                        if u < 0:
+                            y, z = ys - 0.007, st.z(x / M) + 0.002
+                        elif u < 0.06:
+                            y, z = ys + 0.012 * (u / 0.06), st.z(x / M) + 0.002
+                        else:
+                            r_ = min(1.0, (u - 0.06) / 0.25)
+                            y, z = ys + 0.012 - 0.01 * r_, st.z(x / M) + 0.002 + 0.016 * r_
+                    else:
+                        y, z = st.y(1, x / M), st.z(x / M) + 0.016
+                    targets[nm] = (x, y, z)
+                thumb = ((sp["pickups"][0]["x"] + 1.5) * M if sp.get("pickups") else cx - 0.03, st.y(0, cx / M) + 0.006, st.z_br + 0.006)
+                hand.pose(hp, targets, thumb, curls=dict(ring=0.9, pinky=1.0))
+            else:  # pick: the hand sweeps across the strings, down and up
+                top_y, bot_y = st.y(0, cx / M) + 0.012, st.y(n - 1, cx / M) - 0.012
+                y = top_y
+                for (ts, dr, acc) in strums:
+                    a, b = ts - 0.035, ts + 0.05
+                    s0, s1 = (top_y, bot_y) if dr == "down" else (bot_y, top_y)
+                    if t >= b:
+                        y = s1
+                        continue
+                    if t >= a:
+                        y = s0 + (s1 - s0) * smooth((t - a) / (b - a))
+                    elif a - t < 0.12:
+                        y = y + (s0 - y) * smooth(1 - (a - t) / 0.12)
+                    break
+                tipP = np.array([cx, y, st.z_br - 0.001])
+                curls = dict(index=1.0, middle=1.1, ring=1.2, pinky=1.3)
+                frame_ = ((-0.2, -0.9, -0.38), (0.95, -0.2, -0.1), (0.1, -0.4, 0.91))
+
+                def grip(wrist):  # where the pick sits for a wrist: between the thumb tip and the index's last joint
+                    hp_ = HandPose(wrist, *frame_)
+                    ch = hand.chains(hp_, {}, None, curls=curls)
+                    ip, inrm = ch[0]
+                    tt = ip[2] + _unit(np.cross(ip[3] - ip[2], inrm)) * 0.009
+                    ch2 = hand.chains(hp_, {}, tt, curls=curls)
+                    return hp_, tt, (ch2[0][0][2] + ch2[0][0][3] + 2 * ch2[4][0][3]) / 4
+                w0 = tipP + np.array([0.04, 0.08, 0.13])
+                _, _, m0 = grip(w0)
+                hp, tt, mid = grip(w0 + (tipP + np.array([0, 0, 0.016]) - m0))  # move the hand so the pick sits on the strings
+                cs = hand.pose(hp, {}, tt, curls=curls)
+                tipd = _unit(tipP - mid)
+                nrm = _unit(cs[4][0][3] - cs[0][0][2])
+                nrm = _unit(nrm - tipd * (nrm @ tipd))
+                side = np.cross(nrm, tipd)
+                Rm = Matrix(((tipd[0], side[0], nrm[0]), (tipd[1], side[1], nrm[1]), (tipd[2], side[2], nrm[2])))
+                pick.matrix_world = Matrix.Translation(Vector(mid + tipd * 0.008)) @ Rm.to_4x4()
+
+    cam.rotation_euler.rotate_axis("Z", math.radians(-12 if kind in ("fret", "sticks") else 10))  # a tilted frame
     bpy.context.view_layer.update()
     cam0 = cam.matrix_world.copy()
-    if light == "fire":
-        bk.light("AREA", (tgt.x - 0.1, -0.6, tgt.z - 0.25), 60, (1.0, 0.45, 0.13), size=0.5, target=tgt)
-        bk.light("AREA", (tgt.x + 0.2, 0.5, tgt.z + 0.6), 25, (0.55, 0.65, 1.0), size=0.6, target=tgt)
-        bk.world(0.03, (0.05, 0.06, 0.12))
-    elif light == "sunset":
-        bk.light("AREA", (tgt.x - 0.9, -0.3, tgt.z + 0.15), 120, (1.0, 0.6, 0.3), size=0.6, target=tgt)
-        bk.light("AREA", (tgt.x + 0.3, 0.4, tgt.z + 0.8), 30, (0.5, 0.62, 1.0), size=1.0, target=tgt)
-        bk.world(0.15, (0.35, 0.4, 0.6))
-    else:  # stage
-        bk.light("AREA", (tgt.x - 0.5, 0.5, tgt.z + 0.5), 70, (1.0, 0.3, 0.6), size=0.4, target=tgt)
-        bk.light("AREA", (tgt.x + 0.5, -0.5, tgt.z + 0.4), 70, (0.3, 0.5, 1.0), size=0.4, target=tgt)
-        bk.light("AREA", (tgt.x, -0.4, tgt.z + 0.7), 40, (1, 1, 1), size=0.6, target=tgt)
-        bk.world(0.02)
-
-    # ---- per frame
     for fi in range(nfr):
         t = t0 + fi / FPS
-        # strings: the last plucked one shakes, decaying
-        nt = note_at(t)
-        for i, S in enumerate(strings):
-            amp = 0.0
-            if nt and nt[1] == i:
-                age = t - nt[0]
-                if 0 <= age < 1.5:
-                    amp = (0.0016 if n == 4 else 0.0008) * math.exp(-age / 0.5) * (1 if fi % 2 else -1)
-            co = S["base"].copy()
-            if amp:
-                xs = co[:, 0] / M
-                f_ = nt[2]
-                xstop = frets[f_] if f_ > 0 else nut  # vibrating length: bridge -> fret
-                uu = np.clip((xs - bx) / (xstop - bx), 0, 1)
-                co[:, 2] += amp * np.sin(np.pi * uu) * (xs <= xstop)
-            S["me"].vertices.foreach_set("co", co.reshape(-1).astype(np.float32))
-            S["me"].update()
-        if job["kind"] == "fret":
-            p = eased(hand_fret, t)
-            xi = lambda k: fret_mid(int(round(p)) + k) * M  # noqa: E731  index -> pinky, one fret each
-            wrist = (xi(1.5) - 0.015, -0.068, z_nut - 0.085)
-            hp = HandPose(wrist, (0.0, 0.42, 0.91), (1.0, 0.0, 0.0), (0.0, -0.91, 0.42))
-            targets = {}
-            act = nt if (nt and t - nt[0] < 0.6) else None
-            for k, nm in enumerate(names):
-                x = xi(k)
-                pressed = act is not None and act[2] > 0 and int(round(act[2] - p)) == k
-                s_ = act[1] if pressed else min(n - 1, 1 + k // 2)
-                y = sy(s_, x / M) - (0.0 if pressed else 0.004)
-                zt = Z_TIP(x / M) + (0.0 if pressed else 0.014 + 0.004 * k)
-                targets[nm] = (x, y, zt)
-            thumb = (xi(1) + 0.004, 0.004, (g["T"] - 1.2) * M - 0.009)
-            pose_hand(hand, hp, targets, thumb)
-        else:
-            plucks = [nt_ for nt_ in notes if nt_[0] <= t + 0.07]
-            k_last = len(plucks)
-            wrist = (cx + 0.03, 0.075, z_br + 0.115)
-            hp = HandPose(wrist, (-0.1, -0.5, -0.86), (1.0, -0.1, 0.0), (0.0, -0.86, 0.5))
-            targets = {}
-            for k, nm in enumerate(("index", "middle")):
-                mine = [nt_ for j, nt_ in enumerate(plucks) if j % 2 == k]
-                x = cx + (0.012 if k == 0 else -0.004)
-                if mine:
-                    tn, s_, _ = mine[-1]
-                    u = t - tn
-                    ys = sy(s_, x / M)
-                    if u < 0:  # reaching in under the string (treble side)
-                        y, z = ys - 0.007, sz(x / M) + 0.002
-                    elif u < 0.06:  # through the string, resting on the next one toward the thumb
-                        y, z = ys + 0.012 * (u / 0.06), sz(x / M) + 0.002
-                    else:
-                        r_ = min(1.0, (u - 0.06) / 0.25)
-                        y, z = ys + 0.012 - 0.01 * r_, sz(x / M) + 0.002 + 0.016 * r_
-                else:
-                    y, z = sy(1, x / M), sz(x / M) + 0.016
-                targets[nm] = (x, y, z)
-            thumb = ((sp["pickups"][0]["x"] + 1.5) * M if sp.get("pickups") else cx - 0.03, sy(0, cx / M) + 0.006, z_br + 0.006)
-            pose_hand(hand, hp, targets, thumb, curls=dict(ring=0.9, pinky=1.0))
+        frame_fn(fi, t)
         k = fi / max(1, nfr - 1)  # a slow push in
-        fwd = (tgt - cam0.translation).normalized()
+        fwd = (cam_tgt - cam0.translation).normalized()
         cam.matrix_world = Matrix.Translation(fwd * 0.03 * k) @ cam0
-        if os.environ.get("CLOSEUP_DEBUG"):  # a wide look at the whole setup
+        if os.environ.get("CLOSEUP_DEBUG"):
             cam.data.dof.use_dof = False
-            cam.location = tgt + Vector((-0.5, -1.0, 0.7))
-            cam.rotation_euler = (tgt - cam.location).to_track_quat("-Z", "Y").to_euler()
+            off = os.environ["CLOSEUP_DEBUG"].split(",")
+            cam.location = cam_tgt + (Vector(tuple(float(v) for v in off)) if len(off) == 3 else Vector((-0.5, -1.0, 0.7)))
+            cam.rotation_euler = (cam_tgt - cam.location).to_track_quat("-Z", "Y").to_euler()
             cam.data.lens = 30
         sc.render.filepath = f"{out}/f_{fi:04d}.png"
         bpy.ops.render.render(write_still=True)

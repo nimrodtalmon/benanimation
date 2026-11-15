@@ -110,6 +110,22 @@ Read this first in a new session, then `docs/TOOLKIT.md` (pipeline + lessons).
   (sunset / fire / stage). `Show(closeups=4)` cuts them in (intro: fret then pluck; the rest spread evenly).
   Rendered on threes; ~25-50 s a frame on 2 CPUs.
 
+## Round 11 (Nov 15): less clay, skies, drum and pick close-ups
+- Feedback: close-up hands looked like clay; try different skies; add drum and pick close-ups.
+- Hands (`puppet/closeup3d.py` Hand3D): one mesh per hand made once at rest (skin modifier, subdivided), weights from
+  Blender's bone heat on an armature of the palm/finger/thumb bones, bent per frame by dual-quaternion skinning (no
+  collapse at bent knuckles). Skin detail is tied to the rest surface (stored rest position, joint distance, back/palm
+  side, tip distance): knuckle wrinkles, palm creases, pores, redness at joints and tips, SSS, glossy nails with pale
+  free edges. Close-ups skip the paper/TV look (`opts look=False`), render at 1280x720.
+- Kinds: fret, pluck (bass), pick (guitar: the hand is placed so the pick sits on the strings, sweeps down/up with the
+  strums), sticks (drums: kit3d.model() builds the kit in the shot; matched grip, sticks rise and fall to the score's
+  snare/hat hits, the hat shivers; camera over the drummer's shoulder). `kit3d.model()` and `guitar3d.model()` are
+  now reusable scene builders. Builders fall back to their newest finished cache after edits (`blendkit.built`).
+- `Show(closeups=5)`: intro (bass fret then pluck), then drums, guitar pick, bass, drums spread over the song.
+- Skies (`puppet/skies.py`): twilight, stars (Milky Way, airglow, twinkling), clouds (full moon, drifting moonlit
+  clouds), aurora (moving curtains). The clearing plate now has an open (transparent) sky; `Campfire(sky=...)` takes a
+  name, a schedule, or "tour" (twilight -> stars -> aurora in the first peak -> clouds -> stars).
+
 ## Feedback (Nov 14)
 - band2: TV effect too much (keep as a dial: `TVStatic(amount, vhs)`); drummer hand looked detached -> fixed (hand sits in the cuff).
 - Ben's band: Distor = drummer, blonde = guitarist (sings most in songs with vocals; all of them sing), bassist = left boys of the band page.

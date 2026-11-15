@@ -311,8 +311,10 @@ class Guitar3D:
 
     def __init__(self, name):
         import cv2
-        d = cache_dir(name)
-        if not os.path.exists(f"{d}/meta.json"):
+        import blendkit
+        d = blendkit.built(cache_dir(name))  # the newest finished render (rebuild explicitly after editing the builder)
+        if d is None:
+            d = cache_dir(name)
             subprocess.run([sys.executable, os.path.abspath(__file__), "build", name], check=True)
         self.meta = json.load(open(f"{d}/meta.json"))
         self.img = cv2.imread(f"{d}/guitar.png", cv2.IMREAD_UNCHANGED).astype(np.float32) / 255

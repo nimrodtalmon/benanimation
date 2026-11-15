@@ -339,7 +339,7 @@ class Production:
             frame = stage_light(frame, t)
         if self.ghost > 0:
             frame = self.blend_ghost(frame, (a, shot))
-        if self.look is not None:
+        if self.look is not None and opts.get("look", True):  # opts look=False: no paper/TV look (e.g. 3D close-ups)
             frame = self.look(frame, f)
         credit = list(dict.fromkeys([w.j["credit"] for w in who])) + [self.song.credit]
         img = finish(frame, t, 0, 1, rng, credit, zoom=(z, z), focus=focus, vignette=getattr(self.stage, "vignette", 0.45 if self.stage.dark else 0.12), roll=roll)

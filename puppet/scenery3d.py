@@ -369,7 +369,7 @@ def build(name, only=None):
     # ---- the clearing at night: moonlight pass and firelight pass
     if want("clearing"):
         L = S["clearing"]
-        sc = fresh(L["samples"], L["resolution"], transparent=False)
+        sc = fresh(L["samples"], L["resolution"], transparent=True)  # the sky stays open: any sky goes behind (skies.py)
         _sky(-14.0, sun["azimuth"] + 120, 1.0)
         cam = bk.camera(L["camera"], L["target"], L["lens"])
         lib = trees_lib(6, "c")
@@ -377,7 +377,7 @@ def build(name, only=None):
         g = bpy.context.object
         g.scale = (80, 60, 1)
         g.data.materials.append(_ground_mat("cg", (0.04, 0.035, 0.025)))
-        _grass(g, 40000, 0.14, _leaf_mat("cgr", (0.035, 0.05, 0.018)))
+        _grass(g, L.get("grass", 40000), 0.14, _leaf_mat("cgr", (0.035, 0.05, 0.018)))
         cx, cy = 0.0, 3.0
         for i in range(L["trees"]):
             a = rng.uniform(-math.pi * 0.95, math.pi * 0.95) + math.pi / 2  # all around but behind the camera
@@ -419,8 +419,9 @@ class Scenery3D:
         ex = dict(self.S["exposure"])
         sky = np.load(f"{d}/sky_sunset.npy").astype(np.float32)[..., :3]
         ex["walk"] *= 0.45 / max(1e-4, float(np.median(sky.max(-1))))  # the sky's middle -> mid grey
-        amb = np.load(f"{d}/clearing_amb.npy").astype(np.float32)[..., :3]
-        ex["night"] *= 0.05 / max(1e-5, float(np.percentile(amb.max(-1), 90)))
+        amb = np.load(f"{d}/clearing_amb.npy").astype(np.float32)
+        land = amb[..., 3] > 0.5
+        ex["night"] *= 0.05 / max(1e-5, float(np.percentile(amb[..., :3].max(-1)[land] if land.any() else amb[..., :3], 90)))
 
         def disp(n, e):  # linear RGBA -> display BGR + alpha, float32
             a = np.load(f"{d}/{n}.npy").astype(np.float32)
@@ -428,7 +429,8 @@ class Scenery3D:
 
         self.sky = [disp("sky_sunset", ex["walk"])[..., :3], disp("sky_dusk", ex["walk"])[..., :3]]
         self.layers = {k: disp(k, ex["walk"]) for k in ("mid", "near", "ferns")}
-        self.c_amb = np.load(f"{d}/clearing_amb.npy").astype(np.float32)[..., :3]
+        ca = np.load(f"{d}/clearing_amb.npy").astype(np.float32)
+        self.c_amb, self.c_alpha = ca[..., :3], np.clip(ca[..., 3:4], 0, 1)
         self.c_fire = np.load(f"{d}/clearing_fire.npy").astype(np.float32)[..., :3]
         self.night_exposure = ex["night"]
 
@@ -461,9 +463,16 @@ class Scenery3D:
             self._foot = 1 - 0.92 * np.clip((yy - 0.80) / 0.14, 0, 1) ** 1.3
         frame *= self._foot
 
-    def clearing(self, frame, heat, flicker=1.0, moon=1.0):
+    def clearing(self, frame, heat, flicker=1.0, moon=1.0, sky=None):
+        """The night clearing (moonlight + the fire's light) over a sky (BGR, H x W), if given."""
         lin = self.c_amb * moon + self.c_fire * (0.45 * heat * flicker)
-        frame[:] = bk.tonemap(lin, self.night_exposure)[..., ::-1]
+        a = self.c_alpha
+        sh = int(self.S["clearing"].get("shift", 0) * lin.shape[0])  # lower the treeline: more sky above
+        if sh:
+            lin = np.concatenate([np.zeros((sh,) + lin.shape[1:], np.float32), lin[:-sh]], 0)
+            a = np.concatenate([np.zeros((sh,) + a.shape[1:], np.float32), a[:-sh]], 0)
+        land = bk.tonemap(lin / np.maximum(a, 1e-3), self.night_exposure)[..., ::-1]
+        frame[:] = land * a + (sky if sky is not None else 0.0) * (1 - a)
         return frame
 
 
