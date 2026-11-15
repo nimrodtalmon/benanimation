@@ -44,27 +44,13 @@ def catmull(pts, n=12):
     return np.array(out)
 
 
-def build(name, samples=64):
-    import bpy  # noqa: I001  (bpy first: it provides bmesh)
+def model(sp, sc):
+    """Build the instrument's geometry and materials in the current Blender scene (cm in the spec,
+    meters in Blender; the body's front at z = T, the neck along +x, bass side +y). Returns the
+    numbers other builders need (strings, frets) -- see closeup3d.py."""
+    import bpy  # noqa: I001
     import bmesh
-    from mathutils import Vector
-
-    sp = json.load(open(spec_path(name)))
-    out = cache_dir(name)
-    os.makedirs(out, exist_ok=True)
     M = 0.01
-    bpy.ops.wm.read_factory_settings(use_empty=True)
-    sc = bpy.context.scene
-    sc.render.engine = "CYCLES"
-    sc.cycles.device = "CPU"
-    sc.cycles.samples = samples
-    sc.cycles.use_denoising = True
-    sc.render.film_transparent = True
-    sc.view_settings.view_transform = "AgX"
-    sc.view_settings.look = "AgX - Medium High Contrast"
-    sc.render.image_settings.file_format = "PNG"
-    sc.render.image_settings.color_mode = "RGBA"
-
     def mat(nm, base, metallic=0.0, rough=0.5, coat=0.0):
         m = bpy.data.materials.new(nm)
         m.use_nodes = True
@@ -246,6 +232,34 @@ def build(name, samples=64):
         cyl(x, y, top + 2.7, 0.45, 0.6, cream, verts=12)
     for x, y in sp.get("strap_buttons", []):
         cyl(x + (0.6 if x < 1 else 0), y, T / 2, 0.55, 1.2, chrome, verts=16).rotation_euler = (0, math.pi / 2 if x < 1 else 0, 0)
+
+    return dict(outline=outline, nut=nut, bx=bx, joint=joint, n=n, top=top, T=T, scale_l=scale_l, w_nut=w_nut, w_body=w_body,
+                frets=[nut - scale_l * (1 - 2 ** (-k / 12)) for k in range(0, frets + 1)], mats=dict(chrome=chrome, nickel=nickel, black=black))
+
+
+def build(name, samples=64):
+    import bpy  # noqa: I001  (bpy first: it provides bmesh)
+    import bmesh
+    from mathutils import Vector
+
+    sp = json.load(open(spec_path(name)))
+    out = cache_dir(name)
+    os.makedirs(out, exist_ok=True)
+    M = 0.01
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    sc = bpy.context.scene
+    sc.render.engine = "CYCLES"
+    sc.cycles.device = "CPU"
+    sc.cycles.samples = samples
+    sc.cycles.use_denoising = True
+    sc.render.film_transparent = True
+    sc.view_settings.view_transform = "AgX"
+    sc.view_settings.look = "AgX - Medium High Contrast"
+    sc.render.image_settings.file_format = "PNG"
+    sc.render.image_settings.color_mode = "RGBA"
+
+    g = model(sp, sc)
+    outline, nut, bx, joint, n = g["outline"], g["nut"], g["bx"], g["joint"], g["n"]
 
     # ---- camera (orthographic, from the front), lights
     xs = [p[0] for p in outline] + [nut + 22]

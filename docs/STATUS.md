@@ -89,6 +89,27 @@ Read this first in a new session, then `docs/TOOLKIT.md` (pipeline + lessons).
 - `Walking(player, song)` wraps any bust player (one step a beat). `Production(stage=<object>)` accepts any stage.
 - New clip: `clips/campfire` = clips/distorted with `venue=Campfire()`.
 
+## Round 10 (Nov 15): real fire and woods, instrument close-ups
+- Feedback: the drawn fire looked like 90s clip art -> real 3D everywhere (like the drums); add close-ups of hands on
+  instruments (realistic, detailed; Gorillaz-style inserts).
+- `puppet/blendkit.py`: shared Blender helpers (scene, node building, lights, cameras, renders saved as linear .npy,
+  `tonemap` (hue-keeping), `built()` = newest finished cache when a builder was edited after rendering).
+- `puppet/fire3d.py` + `public/fires/campfire.json`: logs (bark, charred middle, glowing cracks), stone ring, ash bed
+  with coals, a volumetric flame (rising 4D noise in a tapered column, fire color ramp) as a seamless loop. Passes:
+  moonlit, firelit, embers (linear, summed per frame with the heat), flame (screened, height follows the heat).
+- `puppet/scenery3d.py` + `public/scenery/forest.json`: procedural spruces (trunk + whorls of branch cards and twigs
+  with needle alpha, light through the needles), ferns, grass (hair), mountains, physical sky (Nishita). Walk layers
+  rendered side-on, one period wide, wrapping (parallax scroll); sky at sunset and dusk; the night clearing as two
+  passes (moon, fire) relit per frame. Stars and moon added in 2D over the sky.
+- `Campfire(real=True)` uses them; firelight now falls only on the cast (found by diffing against the backdrop).
+  `real=False` keeps the drawn version.
+- `puppet/closeup3d.py`: close-ups of hands on any 3D instrument from the score: notes -> (string, fret) with a
+  tuning lowered to fit the song; the fretting hand slides between positions, one finger a fret, thumb behind the
+  neck; the plucking hand alternates index/middle rest strokes; strings shake. Hands: skin-modifier skeleton
+  (knuckle bulges, nails, subsurface skin in the rig's colors, the rig's sleeve). Light presets per venue
+  (sunset / fire / stage). `Show(closeups=4)` cuts them in (intro: fret then pluck; the rest spread evenly).
+  Rendered on threes; ~25-50 s a frame on 2 CPUs.
+
 ## Feedback (Nov 14)
 - band2: TV effect too much (keep as a dial: `TVStatic(amount, vhs)`); drummer hand looked detached -> fixed (hand sits in the cuff).
 - Ben's band: Distor = drummer, blonde = guitarist (sings most in songs with vocals; all of them sing), bassist = left boys of the band page.
