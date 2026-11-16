@@ -57,7 +57,17 @@ Each character is one drawing (head + body, front view) plus a JSON rig:
 | `Campfire(sky=...)` | intro walk through woods at sunset, then a fire at night | `scenery3d.py` (forest.json), `fire3d.py` |
 | `Rooftop(sky=...)` | a city rooftop at night; windows follow the music | `city3d.py` (rooftop.json) |
 
-Skies (`puppet/skies.py`): `twilight`, `stars`, `clouds`, `aurora`, or a schedule `[(t, name), ...]`.
+| `Wilds(moods, weather, giant)` | woods, far mountains, open sky; light, sky and weather follow a story score (the hunt) | `scenery3d.py` (wilds.json, `Wilds3D`) |
+
+Skies (`puppet/skies.py`): `twilight`, `stars`, `clouds`, `aurora`, `dawn`, `day`, `storm`, `blood`, `ash`, or a
+schedule `[(t, name), ...]`. Weather (`puppet/weather.py`, stateless, any venue): `Lightning`, `Rain`,
+`Particles("ash"/"embers")`, `Birds`, `smoke`, `blaze`.
+
+`Wilds` (`puppet/wilds.py`): moods `[(t, "dawn"|"day"|"red"|"storm"|"ash"|"blood"|"night")]` (sky + land tint +
+light passes + light on the cast, crossfaded); weather keyframes `rain/ash/embers/smoke/blaze: [(t, amount)]`,
+`strikes: [(t, x)]`, `birds: [(t, (x, y), dir)]`, `shots: [t]` (gun flashes). The view comes from the cast name:
+`land*` (side-on, scrolling, no one), `walk*` (scrolling, walking busts), `full*` (side-on, still: someone walks
+across), `giant*` (low horizon, the venue's `giant` drawn behind the trees), else the clearing.
 
 **A new venue** = a class with `stage(song)` (an object with `frame(t, wide, cue)` giving the empty
 picture), `cue(t, shot)`, `backdrop(frame, t, shot)`, `fore(frame, t, shot)`, `closeup_light(t)`;
@@ -65,6 +75,15 @@ picture), `cue(t, shot)`, `backdrop(frame, t, shot)`, `fore(frame, t, shot)`, `c
 `keep_bg()` in backdrop, `light_cast(frame, mult)` in fore. For 3D scenery copy `city3d.py`: a JSON
 spec, a Blender `build()` that renders passes (linear `.npy`, open sky as alpha), a 2D class that mixes
 the passes per frame cheaply (precompute everything in `__init__`).
+
+## 4b. Props and the hunter
+
+- `puppet/prop3d.py`: hand props in 3D from `public/props/<name>.json` (parts: profile/box/cyl/ball/ring, materials,
+  anchors in cm), rendered side-on (+ named perspective views) and drawn; `Prop3D(name).draw(frame, at, anchor,
+  angle, scale)`, `.point(...)`, `.draw_at(view, ...)`, `.draw_fit(view, a, pa, b, pb)`. `rifle.json` is the first.
+- `cast/hunter.py` `Hunter`: Distor's full drawing (Singer: legs, face) holding the rifle: poses schedule
+  `[(t, "carry"|"aim"|"god")]`, `shots=[t]` (recoil, muzzle flash, smoke), `sing=[(t0, t1)]` (mouth to the vocals only
+  then), `god(t)` (glowing eyes, dark aura). `Singer.draw_arms()` / `look()` are the hooks it overrides.
 
 ## 5. The story: the recipe
 
@@ -86,7 +105,9 @@ For a different story, either:
 - override in a subclass: `plan()` (the shot list: `(t0, t1, cast name or tuple, opts)`), `make_cast()`,
   `post()` (titles); shot opts: `zoom=(a, b)`, `focus=(x, y)` or `focus(t)`, `tmap(t)` (freeze/loop),
   `whip=±1`, `look=False`.
-- For something not band-shaped, use `Production` directly (see `clips/legacy/` for examples).
+- A story clip (not a band show): subclass `Show`, add cast in `make_cast()` and write `plan()` act by act from the
+  song's times (see `clips/hunt/clip.py`: a `run(a, b, cycle, n)` helper cuts n-bar shots taking turns).
+- For something not band-shaped at all, use `Production` directly (see `clips/legacy/` for examples).
 
 ## 6. One look: drawn
 

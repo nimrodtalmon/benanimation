@@ -1,0 +1,100 @@
+{
+ "_doc": "Woods for the hunt clip (puppet/scenery3d.py): like forest.json, plus far mountains as their own layer (open sky: any 2D sky behind) and the clearing lit by a low sun and by a ring of blazes (the forest on fire), next to moonlight and the campfire.",
+ "sun": {
+  "azimuth": -18,
+  "sunset_elev": 2.0,
+  "dusk_elev": -2.5
+ },
+ "sky": {
+  "mountains": 1,
+  "resolution": [
+   1920,
+   1080
+  ],
+  "samples": 24
+ },
+ "mid": {
+  "period_px": 1920,
+  "m_per_screen": 300,
+  "ridge_px": 700,
+  "trees": 70,
+  "tree_h": [
+   14,
+   26
+  ],
+  "samples": 32
+ },
+ "near": {
+  "period_px": 3840,
+  "m_per_screen": 40,
+  "ground_px": 930,
+  "trees": 14,
+  "tree_h": [
+   14,
+   22
+  ],
+  "samples": 32
+ },
+ "ferns": {
+  "period_px": 3840,
+  "m_per_screen": 4.5,
+  "clumps": 22,
+  "samples": 32
+ },
+ "clearing": {
+  "resolution": [
+   1920,
+   1080
+  ],
+  "camera": [
+   0,
+   -7.0,
+   1.2
+  ],
+  "target": [
+   0,
+   3,
+   3.0
+  ],
+  "lens": 32,
+  "fire": [
+   0,
+   -2.6,
+   0.35
+  ],
+  "trees": 60,
+  "ring": [
+   18,
+   42
+  ],
+  "tree_h": [
+   10,
+   24
+  ],
+  "samples": 40,
+  "grass": 20000,
+  "shift": 0.3,
+  "sun": {
+   "elev": 8,
+   "az": 200,
+   "energy": 3.0
+  },
+  "blaze": {
+   "n": 9,
+   "energy": 900
+  }
+ },
+ "exposure": {
+  "walk": 1.0,
+  "night": 1.0
+ },
+ "far": {
+  "resolution": [
+   2400,
+   1080
+  ],
+  "lens": 35,
+  "samples": 24,
+  "ridge": 0.62
+ }
+}

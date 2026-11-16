@@ -1,0 +1,352 @@
+{
+ "_doc": "A bolt-action hunting rifle for puppet/prop3d.py. Units: cm; x along the rifle (butt at 0, muzzle at the end), z up. Anchors: where hands hold it and where shots come out. Views: side (orthographic, always) and named perspective views (eye/target in cm), e.g. 'aim': pointing at the camera.",
+ "px_per_cm": 14,
+ "samples": 32,
+ "parts": [
+  {
+   "kind": "profile",
+   "name": "stock",
+   "mat": "wood",
+   "width": 4.2,
+   "points": [
+    [
+     0,
+     -9
+    ],
+    [
+     0,
+     4
+    ],
+    [
+     4,
+     5
+    ],
+    [
+     26,
+     1.5
+    ],
+    [
+     36,
+     1.2
+    ],
+    [
+     42,
+     2.4
+    ],
+    [
+     80,
+     2.0
+    ],
+    [
+     96,
+     1.2
+    ],
+    [
+     96,
+     -1.6
+    ],
+    [
+     62,
+     -2.6
+    ],
+    [
+     44,
+     -3.0
+    ],
+    [
+     38,
+     -8.5
+    ],
+    [
+     33,
+     -9.0
+    ],
+    [
+     30,
+     -4.0
+    ],
+    [
+     20,
+     -4.5
+    ]
+   ]
+  },
+  {
+   "kind": "box",
+   "name": "receiver",
+   "mat": "metal",
+   "from": [
+    40,
+    0.2
+   ],
+   "to": [
+    66,
+    3.6
+   ],
+   "width": 3.0
+  },
+  {
+   "kind": "cyl",
+   "name": "barrel",
+   "mat": "metal",
+   "from": [
+    64,
+    2.0
+   ],
+   "to": [
+    116,
+    2.0
+   ],
+   "r0": 1.15,
+   "r1": 0.8
+  },
+  {
+   "kind": "cyl",
+   "name": "muzzle",
+   "mat": "metal",
+   "from": [
+    113,
+    2.0
+   ],
+   "to": [
+    117.2,
+    2.0
+   ],
+   "r0": 1.25,
+   "r1": 1.25
+  },
+  {
+   "kind": "cyl",
+   "name": "scope",
+   "mat": "metal",
+   "from": [
+    42,
+    7.6
+   ],
+   "to": [
+    72,
+    7.6
+   ],
+   "r0": 1.3,
+   "r1": 1.3
+  },
+  {
+   "kind": "cyl",
+   "name": "scope_eye",
+   "mat": "metal",
+   "from": [
+    38,
+    7.6
+   ],
+   "to": [
+    44,
+    7.6
+   ],
+   "r0": 2.0,
+   "r1": 1.3
+  },
+  {
+   "kind": "cyl",
+   "name": "scope_obj",
+   "mat": "metal",
+   "from": [
+    70,
+    7.6
+   ],
+   "to": [
+    80,
+    7.6
+   ],
+   "r0": 1.3,
+   "r1": 2.4
+  },
+  {
+   "kind": "box",
+   "name": "mount_a",
+   "mat": "metal",
+   "from": [
+    46,
+    3.4
+   ],
+   "to": [
+    49,
+    6.6
+   ],
+   "width": 1.6
+  },
+  {
+   "kind": "box",
+   "name": "mount_b",
+   "mat": "metal",
+   "from": [
+    62,
+    3.4
+   ],
+   "to": [
+    65,
+    6.6
+   ],
+   "width": 1.6
+  },
+  {
+   "kind": "cyl",
+   "name": "bolt",
+   "mat": "steel",
+   "from": [
+    47,
+    2.6
+   ],
+   "to": [
+    47,
+    -2.6
+   ],
+   "r0": 0.45,
+   "r1": 0.45,
+   "dy": -3.0
+  },
+  {
+   "kind": "ball",
+   "name": "bolt_knob",
+   "mat": "steel",
+   "at": [
+    47,
+    -2.8
+   ],
+   "r": 1.0,
+   "dy": -3.2
+  },
+  {
+   "kind": "ring",
+   "name": "guard",
+   "mat": "metal",
+   "at": [
+    47,
+    -3.2
+   ],
+   "r": 2.6,
+   "thick": 0.45
+  },
+  {
+   "kind": "box",
+   "name": "trigger",
+   "mat": "steel",
+   "from": [
+    46.6,
+    -4.6
+   ],
+   "to": [
+    47.4,
+    -2.6
+   ],
+   "width": 0.6
+  },
+  {
+   "kind": "box",
+   "name": "pad",
+   "mat": "rubber",
+   "from": [
+    -1.2,
+    -9
+   ],
+   "to": [
+    0.2,
+    4.2
+   ],
+   "width": 4.4
+  },
+  {
+   "kind": "cyl",
+   "name": "bore",
+   "mat": "rubber",
+   "from": [
+    116.9,
+    2.0
+   ],
+   "to": [
+    117.3,
+    2.0
+   ],
+   "r0": 0.55,
+   "r1": 0.55
+  }
+ ],
+ "anchors": {
+  "grip": [
+   39,
+   -5.5
+  ],
+  "fore": [
+   74,
+   -1.5
+  ],
+  "muzzle": [
+   117,
+   2.0
+  ],
+  "butt": [
+   0,
+   -2
+  ],
+  "cheek": [
+   24,
+   3
+  ]
+ },
+ "materials": {
+  "wood": {
+   "color": [
+    0.3,
+    0.13,
+    0.05
+   ],
+   "rough": 0.45,
+   "grain": 1
+  },
+  "metal": {
+   "color": [
+    0.035,
+    0.035,
+    0.04
+   ],
+   "rough": 0.35,
+   "metallic": 0.9
+  },
+  "steel": {
+   "color": [
+    0.45,
+    0.45,
+    0.47
+   ],
+   "rough": 0.25,
+   "metallic": 1.0
+  },
+  "rubber": {
+   "color": [
+    0.02,
+    0.02,
+    0.02
+   ],
+   "rough": 0.9
+  }
+ },
+ "views": {
+  "aim": {
+   "eye": [
+    170,
+    -7,
+    6
+   ],
+   "target": [
+    0,
+    1,
+    1.5
+   ],
+   "lens": 32,
+   "res": [
+    1100,
+    1100
+   ],
+   "fit": 0.92
+  }
+ }
+}

@@ -1,4 +1,4 @@
-# Status (handoff, Nov 16 2026)
+# Status (handoff, Nov 16 2026, round 14)
 
 New session: read `docs/GUIDE.md` (how to make a clip), then this file; `docs/TOOLKIT.md` has the pieces and lessons.
 
@@ -12,6 +12,16 @@ New session: read `docs/GUIDE.md` (how to make a clip), then this file; `docs/TO
 - Checks: `tools/smoke.py` (one frame of each shot kind per clip), `ruff check --select F,E9 puppet tools clips`.
 - Old clips (Production API with Revoy's Pepper/Coriander, motion and style studies) are in `clips/legacy/`; the
   first Remotion version in `legacy/remotion/` (not maintained).
+
+- New (Nov 16, round 14): `clips/hunt`, a story clip (not a band show) to a song Nimrod gave (public/songs/hunt;
+  the audio is NOT in the repo, which is public: only score.json; a new session needs the mp3 again and
+  `python3 puppet/new_song.py <mp3> hunt --credit "..."`). Distor is a hunter with a 3D rifle; acts: the eye, nature,
+  the hunt, the storm (lightning hits him), ash (he rises, glowing eyes), the god (a giant behind the burning trees).
+  New pieces: `puppet/wilds.py` (venue: moods + weather scores), `puppet/weather.py`, skies dawn/day/storm/blood/ash,
+  `scenery3d` wilds.json (far mountains layer, clearing sun + blaze passes, `Wilds3D` drawn in ink),
+  `puppet/prop3d.py` + `public/props/rifle.json`, `cast/hunter.py` (Singer got `draw_arms()` / `look()` hooks).
+  State: stills and a 14 s segment checked; full render waiting for Nimrod's OK; song credit still unknown.
+  Note: scenery3d "far" was rebuilt alone after a fix (camera clip_end) without a BUILD bump.
 
 ## Open issues / ideas
 1. Ben's 3/4 and side drawings for walks (upload app talmonlab.bgu.ac.il/ben/); front-only rigs walk stiffly.

@@ -24,7 +24,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import blendkit as bk  # noqa: E402
 
-BUILD = 13  # bump when the Blender side changes (renders are cached by spec + BUILD)
+BUILD = 14  # bump when the Blender side changes (renders are cached by spec + BUILD)
 ROOT = bk.ROOT
 
 
@@ -275,27 +275,44 @@ def build(name, only=None):
         needle, bark = _needle_mat(prefix + "n", rng), _bark_mat(prefix + "b")
         return [conifer(f"{prefix}{i}", 1.0, rng, needle, bark) for i in range(n)]  # unit height; scaled per instance
 
+    targets = ["far" if "far" in S else "sky", "mid", "near", "ferns", "clearing"]
+
     def want(k):
-        return only is None or k in only
+        return k in (only or targets)
+
+    def mountains():
+        bpy.ops.mesh.primitive_grid_add(x_subdivisions=300, y_subdivisions=120, size=1, location=(0, 4200, 0))
+        mt = bpy.context.object
+        mt.scale = (14000, 3600, 1)
+        mod = mt.modifiers.new("d", "DISPLACE")
+        tx = bpy.data.textures.new("mt", "CLOUDS")
+        tx.noise_scale, tx.noise_depth = 0.25, 4
+        mod.texture, mod.strength, mod.mid_level = tx, 900, 0.45
+        m, n_, b = bk.material("mt", (0.05, 0.05, 0.06), 0.9)
+        mt.data.materials.append(m)
+        bpy.ops.object.shade_smooth()
+        return mt
 
     # ---- sky + mountains (perspective), sunset and dusk
     if want("sky"):
         for tag, el in (("sunset", sun["sunset_elev"]), ("dusk", sun["dusk_elev"])):
             sc = fresh(S["sky"]["samples"], S["sky"]["resolution"], transparent=False)
             _sky(el, sun["azimuth"], 1.0)
-            bk.camera((0, 0, 30), (0, 1000, 120), 35)
-            bpy.ops.mesh.primitive_grid_add(x_subdivisions=300, y_subdivisions=120, size=1, location=(0, 4200, 0))
-            mt = bpy.context.object
-            mt.scale = (14000, 3600, 1)
-            mod = mt.modifiers.new("d", "DISPLACE")
-            tx = bpy.data.textures.new("mt", "CLOUDS")
-            tx.noise_scale, tx.noise_depth = 0.25, 4
-            mod.texture, mod.strength, mod.mid_level = tx, 900, 0.45
-            m, n_, b = bk.material("mt", (0.05, 0.05, 0.06), 0.9)
-            mt.data.materials.append(m)
-            bpy.ops.object.shade_smooth()
+            bk.camera((0, 0, 30), (0, 1000, 120), 35).data.clip_end = 30000
+            mountains()
             bk.render(f"{out}/sky_{tag}.npy")
             print("sky", tag, flush=True)
+
+    # ---- far mountains alone (open sky: any 2D sky goes behind), lit by the low sun
+    if want("far"):
+        L = S["far"]
+        sc = fresh(L["samples"], L["resolution"], transparent=True)
+        _sky(sun["sunset_elev"] + 4, sun["azimuth"], 1.0)
+        cam = bk.camera((0, 0, 30), (0, 1000, 120), L["lens"])
+        cam.data.clip_end = 30000  # the mountains are kilometers away
+        mountains()
+        bk.render(f"{out}/far.npy")
+        print("far", flush=True)
 
     # ---- mid layer: a ridge of trees far off, side-on
     if want("mid"):
@@ -397,10 +414,32 @@ def build(name, only=None):
         bk.render(f"{out}/clearing_fire.npy")
         c = world_to_camera_view(sc, cam, Vector(L["fire"]))
         meta["fire_px"] = [c.x * L["resolution"][0], (1 - c.y) * L["resolution"][1]]
+        fire.hide_render = True
+        if "sun" in L:  # a low sun (day/dawn), with the sky's light
+            su = L["sun"]
+            sl = bk.light("SUN", (0, 0, 10), su["energy"], (1.0, 0.82, 0.62), size=0.02)
+            sl.rotation_euler = (math.radians(90 - su["elev"]), 0, math.radians(su["az"]))
+            _sky(su["elev"], su["az"], 1.0)
+            sc.world.node_tree.nodes["Background"].inputs[1].default_value = 0.6
+            bk.render(f"{out}/clearing_sun.npy")
+            sl.hide_render = True
+            sc.world.node_tree.nodes["Background"].inputs[1].default_value = 0.0
+        if "blaze" in L:  # the forest on fire: orange lights among the trees at the back
+            bz = L["blaze"]
+            spots = []
+            for i in range(bz["n"]):
+                a = math.pi * (0.12 + 0.76 * i / max(1, bz["n"] - 1)) + rng.uniform(-0.08, 0.08)
+                r = rng.uniform(L["ring"][0] * 0.8, L["ring"][0] * 1.3)
+                p = (cx + math.cos(a) * r * 1.2, cy + math.sin(a) * r, rng.uniform(0.6, 3.0))
+                bk.light("POINT", p, bz["energy"] * rng.uniform(0.6, 1.3), (1.0, 0.38, 0.08), size=1.5)
+                cc = world_to_camera_view(sc, cam, Vector(p))
+                spots.append([cc.x * L["resolution"][0], (1 - cc.y) * L["resolution"][1]])
+            meta["blaze_px"] = spots
+            bk.render(f"{out}/clearing_blaze.npy")
         print("clearing", flush=True)
     old = json.load(open(f"{out}/meta.json")) if os.path.exists(f"{out}/meta.json") else {}
     old.update(meta)
-    old["done"] = sorted(set(old.get("done", [])) | set(only or ["sky", "mid", "near", "ferns", "clearing"]))
+    old["done"] = sorted(set(old.get("done", [])) | set(only or targets))
     bk.save_meta(out, **old)
     print("scenery built:", out)
     return out
@@ -471,6 +510,107 @@ class Scenery3D:
             a = np.concatenate([np.zeros((sh,) + a.shape[1:], np.float32), a[:-sh]], 0)
         land = bk.tonemap(lin / np.maximum(a, 1e-3), self.night_exposure)[..., ::-1]
         frame[:] = land * a + (sky if sky is not None else 0.0) * (1 - a)
+        return frame
+
+
+class Wilds3D:
+    """2D side of a scenery with far mountains and an open sky (public/scenery/wilds.json): every
+    layer is drawn once in the active ink style (lines + flattened colors, cached), then each frame
+    only mixes and tints. Two kinds of shot:
+
+      walk(frame, travel, sky, tint)              # side-on: sky, far mountains, ridge, near trees
+      ferns(frame, travel, tint)                  # the ferns in front of the cast (walk shots)
+      clearing(frame, sky, sun=1, moon=0, fire=0, blaze=0, tint=1)   # the clearing, relit by passes
+
+    tint: a BGR multiplier (or H x W x 3) for the light of the moment (dawn, storm, blood...)."""
+
+    def __init__(self, name="wilds", shift=None):
+        """shift: lower the clearing's treeline by this share of the height (default: the spec's)."""
+        import ink
+        d = bk.built(cache_dir(name))
+        if d is None:
+            d = build(name)
+        self.d, self.S = d, spec_of(name)
+        self.meta = json.load(open(f"{d}/meta.json"))
+        ld = lambda n: np.load(f"{d}/{n}.npy").astype(np.float32)  # noqa: E731
+
+        def drawn(n, key_pct=85, target=0.6, lines=True):
+            a = ld(n)
+            al = np.clip(a[..., 3:4], 0, 1)
+            lin = a[..., :3] / np.maximum(al, 1e-3)
+            land = al[..., 0] > 0.5
+            e = target / max(1e-5, float(np.percentile(lin.max(-1)[land], key_pct))) if land.any() else 1.0
+            disp = bk.tonemap(lin, e)[..., ::-1]
+            out = ink.cached(f"{d}/{n}.npy", disp, al[..., 0], lines=lines) if ink.active() else np.concatenate([disp, al], 2)
+            return np.ascontiguousarray(out, np.float32)
+
+        self.far = drawn("far", target=0.55).astype(np.float16)
+        self.layers = {k: drawn(k).astype(np.float16) for k in ("mid", "near", "ferns")}
+        c = {}
+        for k in ("sun", "amb", "fire", "blaze"):
+            if os.path.exists(f"{d}/clearing_{k}.npy"):
+                c[k] = drawn(f"clearing_{k}", key_pct=90, target={"sun": 0.75, "amb": 0.6}.get(k, 0.9), lines=False)
+        self.c_alpha = np.clip(ld("clearing_amb")[..., 3:4], 0, 1)
+        sh = int((self.S["clearing"].get("shift", 0) if shift is None else shift) * self.c_alpha.shape[0])  # lower the treeline
+        self.shift = sh
+
+        def down(x):
+            return np.concatenate([np.zeros((sh,) + x.shape[1:], np.float32), x[:-sh]], 0) if sh else x
+        self.c = {k: down(v[..., :3]) for k, v in c.items()}
+        self.c_alpha = down(self.c_alpha)
+        self.c_lines = None
+        if ink.active():
+            base = self.c.get("sun", self.c.get("amb"))
+            self.c_lines = ink.Lines(base, self.c_alpha[..., 0])
+        self.blaze_px = [(x, y + sh) for x, y in self.meta.get("blaze_px", [])]
+
+    def _scroll(self, frame, img, off, tint, y=0):
+        Hh, Ww = frame.shape[:2]
+        h, w = img.shape[:2]
+        idx = (np.arange(Ww) + int(off)) % w
+        lay = img[:Hh, idx].astype(np.float32)
+        if y:
+            lay = np.roll(lay, y, axis=0)
+            lay[:y] = 0
+        a = lay[..., 3:4]
+        frame *= 1 - a
+        frame += a * lay[..., :3] * tint
+
+    def walk(self, frame, travel, sky, tint=1.0, far_tint=None, horizon=0, layers=("far", "mid", "near")):
+        """horizon: px to push the layers down (a lower camera: more sky). sky None: draw over frame.
+        layers: which to draw (to put something between them, e.g. a giant behind the trees)."""
+        if sky is not None:
+            frame[:] = sky
+        if "far" in layers:
+            ft = tint if far_tint is None else far_tint
+            h, w = self.far.shape[:2]
+            x0 = int((w - frame.shape[1]) / 2 + 0.02 * travel) % max(1, w - frame.shape[1])
+            lay = self.far[:frame.shape[0], x0:x0 + frame.shape[1]].astype(np.float32)
+            if horizon:
+                lay = np.roll(lay, horizon, axis=0)
+                lay[:horizon] = 0
+            a = lay[..., 3:4]
+            frame *= 1 - a
+            frame += a * lay[..., :3] * ft
+        if "mid" in layers:
+            self._scroll(frame, self.layers["mid"], 0.16 * travel, tint, horizon)
+        if "near" in layers:
+            self._scroll(frame, self.layers["near"], 0.55 * travel, tint, horizon)
+        return frame
+
+    def ferns(self, frame, travel, tint=1.0):
+        self._scroll(frame, self.layers["ferns"], 1.5 * travel, tint)
+
+    def clearing(self, frame, sky, sun=1.0, moon=0.0, fire=0.0, blaze=0.0, tint=1.0):
+        land = np.zeros_like(self.c_alpha.repeat(3, 2))
+        for k, wk in (("sun", sun), ("amb", moon), ("fire", fire), ("blaze", blaze)):
+            if wk and k in self.c:
+                land += self.c[k] * wk
+        land *= tint
+        if self.c_lines is not None:
+            land = self.c_lines.draw(np.minimum(land, 1.0))
+        a = self.c_alpha
+        frame[:] = np.minimum(land, 1.0) * a + sky * (1 - a)
         return frame
 
 

@@ -202,6 +202,10 @@ class Singer:
             over_sub(frame, img, xy, frac)
         return np.array([x, top])
 
+    def look(self, t, turn, tilt):
+        """Head turn and tilt of this frame (subclasses steer the gaze)."""
+        return turn, tilt
+
     def draw(self, frame, t):
         self.trace = {}  # key points of this frame (for smoothness checks: tools/jerk.py)
         p, cfg = self.p, self.cfg
@@ -241,6 +245,7 @@ class Singer:
         turn *= 0.7 if singing else 1.0  # sings mostly toward the mic
         if self.path is not None:  # looks where he walks
             turn = float(turn * (1 - speed) + 0.45 * np.sign(self.path.v(t)) * speed)
+        turn, tilt = self.look(t, turn, tilt)
         sway = sway * 40 * p.s + 3 * p.s * math.sin(t * 2.3)
         fig = p.head_frame(turn, float(self.env[fm]), self.vowels[fm], blink, sway)
         th = math.radians(tilt) * p.w_bend
@@ -269,9 +274,15 @@ class Singer:
         R = np.array([[math.cos(a), -math.sin(a)], [math.sin(a), math.cos(a)]])
         mouth = self.X(np.array([self.x0, self.top + bob]) + np.array([px, py]) + R @ (q + [0, nod] - [px, py]))
         self.trace.update(mouth=mouth, shoulder_l=self.X(self.world(self.j["shoulders"]["left"], bob)))
-        s = self.s
         shL = self.X(self.world(self.j["shoulders"]["left"], bob))
         shR = self.X(self.world(self.j["shoulders"]["right"], bob))
+        self.draw_arms(frame, t, dict(shL=shL, shR=shR, mouth=mouth, mw=mw, speed=speed, gb=gb, ph=ph, singing=singing, f=f, stand_top=stand_top))
+
+    def draw_arms(self, frame, t, c):
+        """Both arms and hands (the free arm swings or pumps, the other holds the mic). Subclasses
+        (cast/hunter.py) replace this to hold other things."""
+        s = self.s
+        shL, shR, mouth, mw, speed, gb, ph, singing, f, stand_top = (c[k] for k in ("shL", "shR", "mouth", "mw", "speed", "gb", "ph", "singing", "f", "stand_top"))
         # the free arm (viewer's right): hangs and swings; in the chorus it pumps on beats 1 and 3
         chorus = t >= self.pump_after
         beat_i = int(t / self.song.spb) % 4

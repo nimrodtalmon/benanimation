@@ -3,3 +3,4 @@ out/
 .DS_Store
 public/clip/*.m4a
 __pycache__/
+public/songs/hunt/*.mp3
