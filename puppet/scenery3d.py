@@ -427,8 +427,8 @@ class Scenery3D:
             a = np.load(f"{d}/{n}.npy").astype(np.float32)
             return np.concatenate([bk.tonemap(a[..., :3], e)[..., ::-1], np.clip(a[..., 3:4], 0, 1)], 2)
 
-        self.sky = [disp("sky_sunset", ex["walk"])[..., :3], disp("sky_dusk", ex["walk"])[..., :3]]
-        self.layers = {k: disp(k, ex["walk"]) for k in ("mid", "near", "ferns")}
+        self.sky = [disp("sky_sunset", ex["walk"])[..., :3].astype(np.float16), disp("sky_dusk", ex["walk"])[..., :3].astype(np.float16)]
+        self.layers = {k: disp(k, ex["walk"]).astype(np.float16) for k in ("mid", "near", "ferns")}  # half floats: half the memory
         ca = np.load(f"{d}/clearing_amb.npy").astype(np.float32)
         self.c_amb, self.c_alpha = ca[..., :3], np.clip(ca[..., 3:4], 0, 1)
         self.c_fire = np.load(f"{d}/clearing_fire.npy").astype(np.float32)[..., :3]
@@ -438,7 +438,7 @@ class Scenery3D:
         Hh, Ww = frame.shape[:2]
         h, w = img.shape[:2]
         idx = (np.arange(Ww) + int(off)) % w
-        lay = img[:Hh, idx]
+        lay = img[:Hh, idx].astype(np.float32)
         a = lay[..., 3:4]
         frame *= 1 - a
         frame += a * lay[..., :3] * grade
@@ -450,7 +450,7 @@ class Scenery3D:
 
     def walk(self, frame, t, travel, dusk):
         k = float(np.clip(dusk / 0.7, 0, 1))
-        frame[:] = self.sky[0] * (1 - k) + self.sky[1] * k
+        frame[:] = self.sky[0].astype(np.float32) * (1 - k) + self.sky[1].astype(np.float32) * k
         g = self.grade(dusk)
         self._scroll(frame, self.layers["mid"], 0.16 * travel, g)
         self._scroll(frame, self.layers["near"], 0.55 * travel, g)

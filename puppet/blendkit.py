@@ -64,6 +64,40 @@ def scene(res, samples=64, transparent=True):
     return sc
 
 
+def style():
+    """The drawing style builders should render in, from the environment (BENANIM_STYLE, set by
+    ink.use() so child build processes inherit it): None (plain renders) or a style name."""
+    return os.environ.get("BENANIM_STYLE") or None
+
+
+def drawn(sc, line_px=2.0, color=(0.09, 0.085, 0.08), crease=125.0, wobble=1.2, seed=1):
+    """Pencil/ink outlines from the geometry (Freestyle): silhouettes, borders, creases, with a
+    slight wobble and pressure (thicker in the middle of a stroke). Use with ink.flat() in 2D."""
+    import bpy
+    sc.render.use_freestyle = True
+    sc.render.line_thickness_mode = "ABSOLUTE"
+    vl = bpy.context.view_layer
+    vl.use_freestyle = True
+    fs = vl.freestyle_settings
+    fs.crease_angle = math.radians(crease)
+    ls = fs.linesets[0] if len(fs.linesets) else fs.linesets.new("ink")
+    ls.select_by_visibility = True
+    ls.select_silhouette = ls.select_border = ls.select_crease = True
+    ls.select_external_contour = True
+    if ls.linestyle is None:
+        ls.linestyle = bpy.data.linestyles.new("ink")
+    st = ls.linestyle
+    st.color, st.thickness, st.alpha = color, line_px, 1.0
+    st.thickness_position = "CENTER"
+    st.caps = "ROUND"
+    if wobble:
+        n = st.geometry_modifiers.new("wobble", "PERLIN_NOISE_1D")
+        n.frequency, n.amplitude, n.seed = 12.0, wobble, seed
+    tm = st.thickness_modifiers.new("pressure", "ALONG_STROKE")
+    tm.blend, tm.influence = "MULTIPLY", 0.6
+    return st
+
+
 def world(strength, color=(0.02, 0.03, 0.06)):
     import bpy
     bg = bpy.context.scene.world.node_tree.nodes["Background"]

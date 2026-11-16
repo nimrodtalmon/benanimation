@@ -28,7 +28,8 @@ def spec_path(name):
 
 def cache_dir(name):
     h = hashlib.sha1(open(spec_path(name), "rb").read() + open(os.path.abspath(__file__), "rb").read()).hexdigest()[:10]
-    return f"{ROOT}/out/guitarcache/{name}-{h}"
+    st = os.environ.get("BENANIM_STYLE")  # a drawn style renders its own outlines: its own cache
+    return f"{ROOT}/out/guitarcache/{name}" + (f"@{st}" if st else "") + f"-{h}"
 
 
 def catmull(pts, n=12):
@@ -268,6 +269,9 @@ def build(name, samples=64):
     y0, y1 = min(ys) - 2, max(ys) + 2
     W_, H_ = int((x1 - x0) * PX_PER_CM), int((y1 - y0) * PX_PER_CM)
     sc.render.resolution_x, sc.render.resolution_y = W_, H_
+    if os.environ.get("BENANIM_STYLE"):  # drawn: outlines from the geometry (ink.flat() evens the colors later)
+        import blendkit
+        blendkit.drawn(sc, line_px=3.6 * W_ / 1600, color=(0.03, 0.028, 0.026))
     bpy.ops.object.camera_add(location=((x0 + x1) / 2 * M, (y0 + y1) / 2 * M, 2.0), rotation=(0, 0, 0))
     cam = bpy.context.object
     cam.data.type = "ORTHO"
@@ -318,6 +322,9 @@ class Guitar3D:
             subprocess.run([sys.executable, os.path.abspath(__file__), "build", name], check=True)
         self.meta = json.load(open(f"{d}/meta.json"))
         self.img = cv2.imread(f"{d}/guitar.png", cv2.IMREAD_UNCHANGED).astype(np.float32) / 255
+        import ink
+        if ink.active():
+            self.img = ink.flat_cached(f"{d}/guitar.png", self.img[..., :3], self.img[..., 3])
         self.cv2 = cv2
 
     def at(self, body_px):

@@ -134,6 +134,30 @@ Read this first in a new session, then `docs/TOOLKIT.md` (pipeline + lessons).
   subdivision, keeps the skin shader detail and nails (sized from the mesh's fingertips). `pose(reach=True)` moves the
   hand until the fingertips get to their targets (works for any hand size).
 
+## Round 13 (Nov 16): one drawn look, a rooftop, more movement
+- Feedback: pick/pluck shots; close-ups still clay-ish; the clip is inconsistent (drawn long shots vs 3D close-ups vs
+  a doll-like drum POV) -> one look, preferably closer to the drawings; another background; more movement; keep the
+  code modular for later.
+- Decision: 2.5D drawn. The characters stay Ben's drawings; everything 3D is drawn too: Freestyle outlines from the
+  geometry (`blendkit.drawn()`), then 2D color flattening (`puppet/ink.py`: edge-preserving smoothing, soft lightness
+  bands, lighter/paler, pencil strokes in the darker bands; `ink.draw()` adds picture-based lines for sources without
+  geometry lines). No depth of field in drawn mode. `Show(style3d="ben")` -> `ink.use()` -> env BENANIM_STYLE ->
+  builders (kit3d, guitar3d, closeup3d, city3d) draw outlines and cache separately (`name@ben-hash`); loaders flatten
+  colors through `ink.flat_cached()` (disk cache out/inkcache).
+- Close-ups: a real pick grip (index under the pick, thumb pressing from the back, the hand placed so the pick meets
+  the strings); plucking shot reframed; light preset "rooftop".
+- `puppet/city3d.py` + `public/scenery/rooftop.json`: a city rooftop (tar roof with puddles, parapet, water tower,
+  stair shed with a lamp, AC units, antenna with a red light, strings of bulbs) and a few hundred buildings with
+  random lit windows. Passes: base, windows' light, window ids -> `City3D.frame(windows=share, blackout=...)`.
+- `venues.Rooftop`: windows come on in bursts on the beat through the intro, blackout in breaks, back on the shout,
+  pulse with the kick in peaks; warm/cool light on the cast only (`Venue.light_cast`, now shared by all venues).
+- Movement: `Groove.jump()` (hops on alternating bars in peaks, players alternate by seed), `Groove.lean()` (lean on
+  the shout after a break); `Show.add_moves()` (push-in / pull-out / pan in turns, handheld shake in peaks, whip pans
+  into the entrance, each peak, each shout; `production.whip()`).
+- Rendering: `render_all` re-renders a part that died (out of memory) alone and stitches; scenery layers in half
+  floats, flames in uint8.
+- New clip: `clips/rooftop`.
+
 ## Feedback (Nov 14)
 - band2: TV effect too much (keep as a dial: `TVStatic(amount, vhs)`); drummer hand looked detached -> fixed (hand sits in the cuff).
 - Ben's band: Distor = drummer, blonde = guitarist (sings most in songs with vocals; all of them sing), bassist = left boys of the band page.

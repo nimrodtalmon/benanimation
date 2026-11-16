@@ -33,7 +33,7 @@ import numpy as np
 
 import rig
 from groove import Groove
-from production import W, HandDrawn, Looks, Production, TVStatic
+from production import H, W, HandDrawn, Looks, Production, TVStatic
 from scenery import title_card
 
 
@@ -59,10 +59,12 @@ def head_box(j):
 
 class Show:
     def __init__(self, song, band, name, script, logo=None, end_lines=(), marker=0.25, tv=(0.05, 0.25), head=0.45,
-                 style="mix", groove_drums=0.6, flash_cuts=True, tape_trick=2, kit="classic", kit_size=1.15, venue=None, closeups=5):
+                 style="mix", groove_drums=0.6, flash_cuts=True, tape_trick=2, kit="classic", kit_size=1.15, venue=None, closeups=5, moves=True, style3d=None):
         """kit: a 3D kit (public/kits/<kit>.json, puppet/kit3d.py) or None for the code-drawn one.
         venue: where the show happens (puppet/venues.py): Club() (default: a stage, lights, the logo
         sign) or Campfire() (a dusk walk through the woods in the intro, then a fire at night).
+        moves: camera moves (push-ins, pans, handheld in the peaks, whip pans; add_moves()).
+        style3d: draw everything 3D in a drawing style (ink.STYLES, e.g. "ben") so it sits with the drawings.
         closeups: how many instrument close-ups (3D hands on a 3D instrument, puppet/closeup3d.py)
         to cut in: the first in the intro (the fretting hand, then the plucking/picking hand), the
         rest spread over the song, taking turns between the players who have a 3D instrument."""
@@ -71,7 +73,9 @@ class Show:
         self.marker, self.tv, self.head, self.style = marker, tv, head, style
         self.groove_drums, self.flash_cuts, self.tape_trick = groove_drums, flash_cuts, tape_trick
         self.kit_name, self.kit_size = kit, kit_size
-        self.n_closeups = closeups
+        self.n_closeups, self.moves = closeups, moves
+        import ink
+        ink.use(style3d)  # a drawn look for everything 3D (puppet/ink.py); None: renders as they are
         d = song.data
         self.holes = [tuple(h) for h in d.get("holes", [])]
         self.drums = [m for m in band if m.role == "drums"]
@@ -94,7 +98,7 @@ class Show:
         if self.venue.tv is not None:
             self.tv = self.venue.tv
         self._cast = self.make_cast()
-        self.shots = self.add_closeups(self.plan())
+        self.shots = self.add_moves(self.add_closeups(self.plan()))
         self.venue.bind(self)
 
     # ---- the cast in every shot size
@@ -249,6 +253,40 @@ class Show:
         return out
 
     # ---- lights, sign, haze, flashes, titles
+    def add_moves(self, shots):
+        """Camera moves on the planned shots (kept where a shot already has its own): push-ins,
+        pull-outs and pans taking turns, a handheld shake in the loudest parts, whip pans into the
+        band's entrance, each loud part and each shout after a break."""
+        if not self.moves:
+            return shots
+        peaks = self.song.data.get("peaks", [])
+        whips = [self.band_in] + [a for a, _ in peaks] + list(self.shouts)
+        out = []
+        for i, (a, b, w, o) in enumerate(shots):
+            if (isinstance(w, str) and w.startswith("cu_")) or "tmap" in o:
+                out.append((a, b, w, o))
+                continue
+            o = dict(o)
+            kind = i % 4
+            if "zoom" not in o and "focus" not in o:
+                if kind == 0:
+                    o["zoom"] = (1.0, 1.1)
+                elif kind == 1:
+                    o["zoom"] = (1.1, 1.0)
+                elif kind == 2:
+                    sgn = 1 if (i // 4) % 2 else -1
+                    o["zoom"] = (1.1, 1.1)
+                    o["focus"] = (lambda t, a=a, b=b, sgn=sgn: (W / 2 + sgn * 90 * ((t - a) / (b - a) - 0.5), H * 0.42))
+            if any(pa <= a < pb for pa, pb in peaks):  # handheld: the camera shakes with the band
+                base = o.get("focus", (W / 2, H * 0.42))
+                o["focus"] = (lambda t, base=base: (lambda f: (f[0] + 7 * math.sin(t * 23.0) + 4 * math.sin(t * 37.0),
+                                                                f[1] + 5 * math.sin(t * 29.0 + 1)))(base(t) if callable(base) else base))
+                o["zoom"] = tuple(z + 0.02 for z in o.get("zoom", (1.0, 1.05)))
+            if any(abs(a - tw) < 0.06 for tw in whips):
+                o["whip"] = 1 if i % 2 else -1
+            out.append((a, b, w, o))
+        return out
+
     def add_closeups(self, shots):
         """Cut instrument close-ups into the shot list (see __init__)."""
         if not self.n_closeups:

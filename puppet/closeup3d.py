@@ -102,8 +102,9 @@ def rig_colors(rig):
 def closeup_job(song, rig, kind, t0, t1, light="fire", res=(1280, 720), samples=20, model=None):
     j = json.load(open(f"{ROOT}/public/parts/{rig}/parts.json"))
     skin, sleeve = rig_colors(rig)
+    import blendkit
     base = dict(rig=rig, kind=kind, t0=round(t0, 3), t1=round(t1, 3), fps=FPS, light=light, res=list(res), samples=samples,
-                skin=skin, sleeve=sleeve, seed=int(sum(map(ord, rig)) + 7 * int(t0)))
+                skin=skin, sleeve=sleeve, seed=int(sum(map(ord, rig)) + 7 * int(t0)), style=blendkit.style())
     if kind == "sticks":
         hits = [[round(e["t"], 3), int(e["piece"])] for e in song.data.get("drums", []) if t0 - 1.0 <= e["t"] < t1 + 0.5]
         return dict(base, model=model or "classic", family="kit", notes=hits)
@@ -155,8 +156,13 @@ class CloseUp:
         if i not in self.frames:
             if len(self.frames) > 6:  # keep memory small: each frame is a full float image
                 self.frames.clear()
-            im = cv2.imread(f"{self.d}/f_{i:04d}.png", cv2.IMREAD_UNCHANGED)
-            self.frames[i] = im.astype(np.float32) / (65535.0 if im.dtype == np.uint16 else 255.0)
+            f = f"{self.d}/f_{i:04d}.png"
+            im = cv2.imread(f, cv2.IMREAD_UNCHANGED)
+            im = im.astype(np.float32) / (65535.0 if im.dtype == np.uint16 else 255.0)
+            if self.job.get("style"):  # outlines were drawn in Blender; flatten the colors to match
+                import ink
+                im = ink.flat_cached(f, im[..., :3], im[..., 3])
+            self.frames[i] = im
         return self.frames[i]
 
 
@@ -516,6 +522,10 @@ def lights(preset, tgt):
         bk.light("AREA", (tgt.x - 0.9, tgt.y - 0.3, tgt.z + 0.15), 70, (1.0, 0.6, 0.3), size=0.6, target=tgt)
         bk.light("AREA", (tgt.x + 0.3, tgt.y + 0.4, tgt.z + 0.8), 30, (0.5, 0.62, 1.0), size=1.0, target=tgt)
         bk.world(0.15, (0.35, 0.4, 0.6))
+    elif preset == "rooftop":  # warm bulbs above, a cool rim from the city
+        bk.light("AREA", (tgt.x, tgt.y - 0.2, tgt.z + 0.9), 70, (1.0, 0.7, 0.4), size=0.8, target=tgt)
+        bk.light("AREA", (tgt.x + 0.4, tgt.y + 0.6, tgt.z + 0.2), 35, (0.5, 0.65, 1.0), size=0.6, target=tgt)
+        bk.world(0.05, (0.1, 0.12, 0.2))
     else:  # stage
         bk.light("AREA", (tgt.x - 0.5, tgt.y + 0.5, tgt.z + 0.5), 70, (1.0, 0.3, 0.6), size=0.4, target=tgt)
         bk.light("AREA", (tgt.x + 0.5, tgt.y - 0.5, tgt.z + 0.4), 70, (0.3, 0.5, 1.0), size=0.4, target=tgt)
@@ -668,6 +678,9 @@ def build(job_path):
     sc.render.image_settings.color_depth = "8"
     mats = hand_materials(job)
     kind = job["kind"]
+    drawn = bool(job.get("style"))
+    if drawn:
+        bk.drawn(sc, line_px=3.4 * job["res"][0] / 1024, color=(0.03, 0.028, 0.026))
     t0, t1 = job["t0"], job["t1"]
     nfr = max(1, int(round((t1 - t0) * FPS)))
     M = 0.01
@@ -759,7 +772,8 @@ def build(job_path):
                 pkb.inputs["Coat Weight"].default_value = 0.8
                 pick = _pick(pk_m)
             else:
-                cam = bk.camera((cx - 0.16, -0.24, st.z_br + 0.20), cam_tgt, 50, dof=(0.36, 2.4))
+                cam_tgt = Vector((cx, 0.01, st.z_br + 0.03))
+                cam = bk.camera((cx - 0.20, -0.30, st.z_br + 0.25), cam_tgt, 45, dof=(0.44, 2.4))
             hand = Hand3D("hand", "right", mats)
         lights(job["light"], cam_tgt)
 
@@ -822,28 +836,26 @@ def build(job_path):
                     elif a - t < 0.12:
                         y = y + (s0 - y) * smooth(1 - (a - t) / 0.12)
                     break
-                tipP = np.array([cx, y, st.z_br - 0.001])
-                curls = dict(index=1.0, middle=1.1, ring=1.2, pinky=1.3)
-                frame_ = ((-0.2, -0.9, -0.38), (0.95, -0.2, -0.1), (0.1, -0.4, 0.91))
-
-                def grip(wrist):  # where the pick sits for a wrist: between the thumb tip and the index's last joint
-                    hp_ = HandPose(wrist, *frame_)
-                    ch = hand.chains(hp_, {}, None, curls=curls)
-                    ip, inrm = ch[0]
-                    tt = ip[2] + _unit(np.cross(ip[3] - ip[2], inrm)) * 0.009
-                    ch2 = hand.chains(hp_, {}, tt, curls=curls)
-                    return hp_, tt, (ch2[0][0][2] + ch2[0][0][3] + 2 * ch2[4][0][3]) / 4
-                w0 = tipP + np.array([0.04, 0.08, 0.13])
-                _, _, m0 = grip(w0)
-                hp, tt, mid = grip(w0 + (tipP + np.array([0, 0, 0.016]) - m0))  # move the hand so the pick sits on the strings
-                cs = hand.pose(hp, {}, tt, curls=curls)
+                tipP = np.array([cx, y, st.z_br - 0.001])  # where the pick's tip meets the strings
+                f_ = _unit(np.array([-0.2, -0.45, -0.87]))  # fingers point down at the strings, toward the treble side
+                l_ = _unit(np.array([0.97, -0.2, 0.0]))
+                l_ = _unit(l_ - (l_ @ f_) * f_)
+                dz_ = np.cross(f_, l_)  # right hand
+                pick_c = tipP + np.array([0, 0, 0.011])  # the pick's middle, just above the strings
+                hp = HandPose(pick_c - f_ * 0.12 + dz_ * 0.02, f_, l_, dz_)
+                targets = {"index": pick_c - dz_ * 0.004 + l_ * 0.002}  # the index's side under the pick
+                thumb = pick_c + dz_ * 0.009  # the thumb presses it from the back
+                cs = hand.pose(hp, targets, thumb, curls=dict(middle=1.2, ring=1.35, pinky=1.45))
+                mid = (cs[0][0][3] + cs[4][0][3]) / 2
                 tipd = _unit(tipP - mid)
-                nrm = _unit(cs[4][0][3] - cs[0][0][2])
+                nrm = _unit(cs[4][0][3] - cs[0][0][3])
                 nrm = _unit(nrm - tipd * (nrm @ tipd))
                 side = np.cross(nrm, tipd)
                 Rm = Matrix(((tipd[0], side[0], nrm[0]), (tipd[1], side[1], nrm[1]), (tipd[2], side[2], nrm[2])))
-                pick.matrix_world = Matrix.Translation(Vector(mid + tipd * 0.008)) @ Rm.to_4x4()
+                pick.matrix_world = Matrix.Translation(Vector(mid + tipd * 0.006)) @ Rm.to_4x4()
 
+    if drawn:
+        cam.data.dof.use_dof = False  # drawings have everything in focus
     cam.rotation_euler.rotate_axis("Z", math.radians(-12 if kind in ("fret", "sticks") else 10))  # a tilted frame
     bpy.context.view_layer.update()
     cam0 = cam.matrix_world.copy()

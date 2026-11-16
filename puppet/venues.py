@@ -41,6 +41,21 @@ class Venue:
     def fore(self, frame, t, shot):
         pass
 
+    # ---- light that falls only on the cast (the plates carry their own light)
+    def keep_bg(self, frame):
+        """Call from backdrop(): remembers the picture before the cast is drawn."""
+        self._bg = frame.copy()
+
+    def cast_mask(self, frame):
+        import cv2
+        m = (np.abs(frame - self._bg).max(-1) > 0.003).astype(np.float32)
+        return cv2.GaussianBlur(m, (0, 0), 1.5)[..., None]
+
+    def light_cast(self, frame, mult):
+        """Multiply only the cast's pixels by mult (H x W x 3 or 3,)."""
+        m = self.cast_mask(frame)
+        frame[:] = frame * (1 - m) + frame * np.asarray(mult, np.float32) * m
+
 
 class Club(Venue):
     """The stage: a spotlight in the intro, beams and the logo sign when the band comes in, the
@@ -296,3 +311,85 @@ class Campfire(Venue):
         u = t - s.band_in
         if 0 <= u < 0.6:  # the ignition
             frame += np.array([0.10, 0.30, 0.55], np.float32) * math.exp(-u / 0.12)
+
+
+class Rooftop(Venue):
+    """A city rooftop at night (puppet/city3d.py), drawn like everything 3D when a style is on. The
+    city follows the song: its windows come on in bursts on the beat through the intro, it blacks
+    out in the breaks and comes back on the shout, and in the loudest parts the windows pulse with
+    the kick drum. Warm light from the string bulbs above and a cool rim from the city on the cast.
+    sky: as Campfire (puppet/skies.py), default: twilight, then moonlit clouds, stars at the end."""
+    tv = (0.03, 0.15)
+    dark, vignette = False, 0.35
+
+    def __init__(self, seed=5, scenery="rooftop", sky="tour"):
+        self.seed, self.scenery_name, self.sky_spec = seed, scenery, sky
+
+    def bind(self, show):
+        from city3d import City3D
+        from skies import Skies
+        self.show = show
+        self.city = City3D(self.scenery_name)
+        self.skies = Skies(self.seed)
+        s = show
+        if isinstance(self.sky_spec, str) and self.sky_spec != "tour":
+            self.sky_schedule = [(0.0, self.sky_spec)]
+        elif isinstance(self.sky_spec, (list, tuple)):
+            self.sky_schedule = list(self.sky_spec)
+        else:
+            self.sky_schedule = [(0.0, "twilight"), (s.band_in + 2, "clouds"), (s.end - 8, "stars")]
+        beats = np.array(s.song.data.get("beats", []), float)
+        self.beats = beats
+        self.kicks = np.array([e["t"] for e in s.song.data.get("drums", []) if int(e.get("piece", 0)) == 36], float)
+
+    def stage(self, song):
+        return self
+
+    def windows(self, t):
+        """Share of windows lit: rising in steps on the beat through the intro, all after."""
+        b = self.show.band_in
+        if t >= b:
+            return 1.0
+        nb = int(np.searchsorted(self.beats, t)) if len(self.beats) else int(t * 2)
+        n_all = max(1, int(np.searchsorted(self.beats, b))) if len(self.beats) else int(b * 2)
+        return 0.04 + 0.96 * (nb / n_all) ** 1.3
+
+    def blackout(self, t):
+        s = self.show
+        for a, b in s.holes:
+            if a - 0.02 <= t < b:
+                return min(1.0, (t - a + 0.02) / 0.06)
+        if t >= s.end:
+            return min(1.0, (t - s.end) / 1.5)
+        return 0.0
+
+    def pulse(self, t):
+        if not len(self.kicks) or not any(pa <= t < pb for pa, pb in self.show.song.data.get("peaks", [])):
+            return 0.0
+        i = int(np.searchsorted(self.kicks, t)) - 1
+        return float(np.exp(-(t - self.kicks[i]) / 0.12)) if i >= 0 else 0.0
+
+    def frame(self, t, wide, cue):
+        f = np.empty((H, W, 3), np.float32)
+        self.city.frame(f, self.windows(t) * (1 + 0.0 * self.pulse(t)), self.blackout(t) - 0.35 * self.pulse(t),
+                        sky=self.skies.mix(self.sky_schedule, t))
+        return f
+
+    def closeup_light(self, t):
+        return "rooftop"
+
+    def backdrop(self, frame, t, shot):
+        self.keep_bg(frame)
+
+    def fore(self, frame, t, shot):
+        if isinstance(shot, str) and shot.startswith("cu_"):
+            return
+        yy = np.linspace(0, 1, H, dtype=np.float32)[:, None, None]
+        bo = self.blackout(t)
+        warm = np.array([0.55, 0.8, 1.05], np.float32) * (1.0 - 0.6 * yy) * (1 - 0.7 * bo)  # bulbs above
+        cool = np.array([1.0, 0.85, 0.7], np.float32) * 0.45 * (1 - 0.5 * bo)  # the city's blue
+        self.light_cast(frame, warm + cool * 0.6)
+        for t_on in self.show.shouts:  # the lights slam back on with the shout
+            u = t - t_on
+            if 0 <= u < 0.35:
+                frame += np.array([0.25, 0.28, 0.32], np.float32) * math.exp(-u / 0.08)

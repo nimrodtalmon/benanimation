@@ -262,7 +262,7 @@ class Fire3D:
         self.meta = json.load(open(f"{d}/meta.json"))
         ld = lambda n: np.load(f"{d}/{n}.npy").astype(np.float32)  # noqa: E731
         self.amb, self.lit, self.ember = ld("amb"), ld("lit"), ld("ember")
-        self.flames = [cv2.imread(f"{d}/flame_{i:03d}.png").astype(np.float32) / 255 for i in range(self.meta["loop"])]
+        self.flames = [cv2.imread(f"{d}/flame_{i:03d}.png") for i in range(self.meta["loop"])]  # uint8: small in memory
         self._cache = {}
 
     def _scaled(self, key, img, s):
@@ -288,7 +288,7 @@ class Fire3D:
         # the flame: taller with heat, screened on
         i = int(t * 30) % self.meta["loop"]
         fs = max(0.05, 0.35 + 0.6 * min(1.5, heat))
-        f = self.flames[i]
+        f = self.flames[i].astype(np.float32) / 255
         f = cv2.resize(f, None, fx=s * (0.85 + 0.15 * fs), fy=s * fs, interpolation=cv2.INTER_AREA)
         f *= float(np.clip((heat - 0.1) / 0.8, 0, 1))
         fx0, fy0 = int(round(pos[0] - bx * s * (0.85 + 0.15 * fs))), int(round(pos[1] - by * s * fs))

@@ -37,7 +37,7 @@ class Groove:
         """style "rock": sway, dips and head-banging. style "ce" (Clint Eastwood, measured from the
         video): the body is held; the head drifts at a constant speed (turn and tilt as slow
         triangle waves, ~6 s per leg, never stopping), no nods; only the hands play."""
-        self.song, self.amount, self.style = song, amount, style
+        self.song, self.amount, self.style, self.seed = song, amount, style, seed
         self.k = dict(sway=sway, bounce=bounce, nod=nod, step=step, lean=lean)
         d = song.data
         self.beats = np.array(d.get("beats") or np.arange(0, song.duration, song.spb))
@@ -173,9 +173,29 @@ class Groove:
                        nod=38 * bang, turn=0.15 * math.sin(2 * math.pi * t / (4 * bar) + self.phase[2]), tilt=3 * math.sin(2 * math.pi * t / bar))
             base = self.at_mix_calm(t, r, ce, w)
             m = {k: base[k] * (1 - pk) + out[k] * pk * self.amount for k in out}
+            m["dy"] -= self.jump(t) * pk * self.amount
             m.update(energy=e, hole=r["hole"], bang=pk * bang)
-            return m
-        return self.at_mix_calm(t, r, ce, w)
+            return self.lean(t, m)
+        return self.lean(t, self.at_mix_calm(t, r, ce, w))
+
+    def jump(self, t, height=55.0, dur=0.42):
+        """A hop off the floor at the start of every other bar (players alternate by seed), px at scale 0.5."""
+        bar = self.song.bar
+        k = int(t // bar)
+        if (k + self.seed) % 2:
+            return 0.0
+        u = (t - k * bar) / dur
+        return height * math.sin(math.pi * u) if 0 <= u < 1 else 0.0
+
+    def lean(self, t, m, deg=9.0):
+        """When a break ends (the shout), the body leans back hard and comes up slowly."""
+        for a, b in self.holes:
+            u = t - b
+            if -0.08 <= u < 1.2:
+                env = min(1.0, (u + 0.08) / 0.12) * (1.0 if u < 0.4 else max(0.0, 1 - (u - 0.4) / 0.8))
+                m = dict(m, rot=m["rot"] - deg * env * (1 if self.seed % 2 else -1))
+                break
+        return m
 
     def at_mix_calm(self, t, r, ce, w):
         e = r["energy"]

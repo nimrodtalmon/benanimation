@@ -28,6 +28,28 @@ def stage_light(frame, t):
     return frame
 
 
+def _duration(path):
+    """Seconds of video in a file (0 if unreadable)."""
+    try:
+        r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path], capture_output=True, text=True)
+        return float(r.stdout.strip() or 0)
+    except (ValueError, OSError):
+        return 0.0
+
+
+def whip(img, u, direction=1):
+    """A whip-pan smear: u from 0 (just cut, smeared and still sliding in) to 1 (settled)."""
+    k = 1 - u
+    n = int(90 * k * k) + 1
+    if n < 3:
+        return img
+    ker = np.zeros((1, n), np.float32)
+    ker[0, :] = 1.0 / n
+    out = cv2.filter2D(img, -1, ker)
+    shift = int(direction * 0.12 * W * k * k)
+    return np.roll(out, shift, axis=1)
+
+
 def finish(frame, t, f, n, rng, credit, zoom=(1.0, 1.06), focus=(W / 2, H * 0.42), vignette=0.45, roll=0.0):
     z = zoom[0] + (zoom[1] - zoom[0]) * f / max(1, n - 1)
     C = cv2.getRotationMatrix2D((focus[0] + 8 * math.sin(t * 0.8), focus[1]), roll, z)
@@ -343,6 +365,8 @@ class Production:
             frame = self.look(frame, f)
         credit = list(dict.fromkeys([w.j["credit"] for w in who])) + [self.song.credit]
         img = finish(frame, t, 0, 1, rng, credit, zoom=(z, z), focus=focus, vignette=getattr(self.stage, "vignette", 0.45 if self.stage.dark else 0.12), roll=roll)
+        if opts.get("whip") and t - a < 0.16:  # a whip pan into the shot: smeared sideways, settling
+            img = whip(img, (t - a) / 0.16, opts["whip"])
         return self.post(img, t) if self.post else img
 
     def parallax_bg(self, frame, z, fc):
@@ -405,8 +429,21 @@ class Production:
         procs = [subprocess.Popen([sys.executable, self.script, "segment", str(cuts[i]), str(cuts[i + 1]), segs[i]]) for i in range(parts)]
         for p in procs:
             p.wait()
+        # a part can die (out of memory with parts side by side): render what it missed, alone
+        entries = []
+        for i, sp in enumerate(segs):
+            got = _duration(sp)
+            want = cuts[i + 1] - cuts[i]
+            if got < want - 0.1:
+                keep = max(0.0, got - 0.1)
+                print(f"part {i} stopped at {cuts[i] + got:.2f}s: rendering the rest alone")
+                rest = sp.replace(".mp4", "-rest.mp4")
+                subprocess.run([sys.executable, self.script, "segment", str(cuts[i] + keep), str(cuts[i + 1]), rest], check=True)
+                entries += ([f"file '{sp}'\noutpoint {keep:.3f}\n"] if keep > 0 else []) + [f"file '{rest}'\n"]
+            else:
+                entries.append(f"file '{sp}'\n")
         lst = f"{ROOT}/out/{self.name}-segs.txt"
-        open(lst, "w").write("".join(f"file '{s}'\n" for s in segs))
+        open(lst, "w").write("".join(entries))
         out = f"{ROOT}/out/{self.name}.mp4"
         subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0", "-i", lst, "-i", self.song.audio,
                         "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest", out], check=True)

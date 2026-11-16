@@ -31,7 +31,8 @@ def spec_path(name):
 def cache_dir(name):
     spec = open(spec_path(name), "rb").read()
     h = hashlib.sha1(spec + open(os.path.abspath(__file__), "rb").read()).hexdigest()[:10]
-    return f"{ROOT}/out/kitcache/{name}-{h}"
+    st = os.environ.get("BENANIM_STYLE")  # a drawn style renders its own outlines: its own cache
+    return f"{ROOT}/out/kitcache/{name}" + (f"@{st}" if st else "") + f"-{h}"
 
 
 # ---------------------------------------------------------------- Blender side (build)
@@ -362,6 +363,9 @@ def build(name, samples=96):
     sc.view_settings.look = "AgX - Medium High Contrast"
     W_, H_ = spec["camera"]["resolution"]
     sc.render.resolution_x, sc.render.resolution_y = W_, H_
+    if os.environ.get("BENANIM_STYLE"):  # drawn: outlines from the geometry (ink.flat() evens the colors later)
+        import blendkit
+        blendkit.drawn(sc, line_px=3.6 * W_ / 1600, color=(0.03, 0.028, 0.026))
     sc.render.image_settings.file_format = "PNG"
     sc.render.image_settings.color_mode = "RGBA"
 
@@ -528,6 +532,9 @@ class Kit3D:
         if key not in self._cache:
             cv2 = self.cv2
             im = cv2.imread(f"{self.dir}/{fn}", cv2.IMREAD_UNCHANGED).astype(np.float32) / 255
+            import ink
+            if ink.active():
+                im = ink.flat_cached(f"{self.dir}/{fn}", im[..., :3], im[..., 3])
             f = s * self.meta["units_per_px"]
             im = cv2.resize(im, None, fx=f, fy=f, interpolation=cv2.INTER_AREA if f < 1 else cv2.INTER_CUBIC)
             a = im[..., 3:4]
