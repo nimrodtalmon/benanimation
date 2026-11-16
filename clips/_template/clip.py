@@ -1,32 +1,28 @@
-"""Template for a new clip. Copy this folder to clips/<name>/ and edit.
+"""A new clip: copy this folder to clips/<name>/ and edit. See docs/GUIDE.md.
 
-1. A Song: a score JSON (bpm, duration, and whatever events your characters use: "drums",
-   "guitar", "vocal" ...), the mixed audio and (for singing) an aligned vocal-only track.
-2. A cast: name -> factory. Characters live in puppet/cast/<name>.py; each has
-   __init__(song, scale, cx, top), draw(frame, t), and j["credit"]. A new character = one module.
-3. SHOTS: (start, end, name) or (start, end, (name, name, ...)) for several in one frame.
-
-  python3 clips/<name>/clip.py stills 1 3 5     -> check frames first
-  python3 clips/<name>/clip.py video            -> out/<name>.mp4
+  python3 clips/<name>/clip.py stills 3 16 24.5     # check frames first
+  python3 tools/prebuild.py clips/<name>/clip.py     # build the 3D close-ups ahead (optional)
+  python3 clips/<name>/clip.py video                 # -> out/<name>.mp4
 """
 import os
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, f"{ROOT}/puppet")
-from cast.distor import Singer  # noqa: E402
-from production import Production  # noqa: E402
+from scenery import ben_logo  # noqa: E402
+from show import Member, Show  # noqa: E402
 from song import Song  # noqa: E402
+from venues import Rooftop  # noqa: E402  (or Club, Campfire)
 
-song = Song.default()  # replace: Song("clips/<name>/score.json", "clips/<name>/mix.wav", "clips/<name>/vocals.wav", "Song: ... (license)")
-
-CAST = {
-    "hero": lambda: Singer(song),
-    "hero_full": lambda: Singer(song, scale=0.245, top=40),
-}
-SHOTS = [(0, 4, "hero_full"), (4, song.duration, "hero")]
-
-prod = Production(song, CAST, SHOTS, name="template", script=os.path.abspath(__file__))
+BAND = [Member("drums", "distor"),                                  # rigs in public/rigs/ (+ public/parts/)
+        Member("guitar", "blonde", side="blonde_side", sings=False),
+        Member("bass", "bassboy", seed=1)]
+show = Show(Song.load("dr1"), BAND, name="template", script=__file__, logo=ben_logo(),
+            venue=Rooftop(sky="tour"),    # where; sky: twilight / stars / clouds / aurora / a schedule
+            style3d="ben",                # everything 3D drawn like the drawings (None: photoreal 3D)
+            closeups=5, moves=True,       # 3D hands on instruments; camera moves
+            end_lines=["music: ...", "drawings: Ben"])
+prod = show.production()
 
 if __name__ == "__main__":
     prod.main(sys.argv)

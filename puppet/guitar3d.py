@@ -18,6 +18,7 @@ import sys
 
 import numpy as np
 
+BUILD = 13  # bump when the Blender side changes: renders are cached by spec + BUILD (2D edits keep them)
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PX_PER_CM = 24.0
 
@@ -27,7 +28,7 @@ def spec_path(name):
 
 
 def cache_dir(name):
-    h = hashlib.sha1(open(spec_path(name), "rb").read() + open(os.path.abspath(__file__), "rb").read()).hexdigest()[:10]
+    h = hashlib.sha1(open(spec_path(name), "rb").read() + str(BUILD).encode()).hexdigest()[:10]
     st = os.environ.get("BENANIM_STYLE")  # a drawn style renders its own outlines: its own cache
     return f"{ROOT}/out/guitarcache/{name}" + (f"@{st}" if st else "") + f"-{h}"
 
@@ -240,7 +241,6 @@ def model(sp, sc):
 
 def build(name, samples=64):
     import bpy  # noqa: I001  (bpy first: it provides bmesh)
-    import bmesh
     from mathutils import Vector
 
     sp = json.load(open(spec_path(name)))

@@ -19,6 +19,7 @@ import sys
 
 import numpy as np
 
+BUILD = 13  # bump when the Blender side changes: renders are cached by spec + BUILD (2D edits keep them)
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 UNITS_PER_CM = 450 / 55.0  # kit units per cm at the drummer (Pepper's arm: 450 units)
 SHOULDER_UNITS = (403, 650)
@@ -30,7 +31,7 @@ def spec_path(name):
 
 def cache_dir(name):
     spec = open(spec_path(name), "rb").read()
-    h = hashlib.sha1(spec + open(os.path.abspath(__file__), "rb").read()).hexdigest()[:10]
+    h = hashlib.sha1(spec + str(BUILD).encode()).hexdigest()[:10]
     st = os.environ.get("BENANIM_STYLE")  # a drawn style renders its own outlines: its own cache
     return f"{ROOT}/out/kitcache/{name}" + (f"@{st}" if st else "") + f"-{h}"
 
@@ -344,9 +345,8 @@ def model(spec, sc):
 
 def build(name, samples=96):
     import bpy
-    import bmesh
     from bpy_extras.object_utils import world_to_camera_view
-    from mathutils import Euler, Matrix, Vector
+    from mathutils import Euler, Vector
 
     spec = json.load(open(spec_path(name)))
     out = cache_dir(name)

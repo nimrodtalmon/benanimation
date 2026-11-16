@@ -191,7 +191,7 @@ def vocal(y):
     return out
 
 
-def peaks(y, beats, rel=0.97, jump=0.15, min_bars=4, max_share=0.5):
+def loud_parts(y, beats, rel=0.97, jump=0.15, min_bars=4, max_share=0.5):
     """The song's biggest parts (choruses, for an instrumental the loudest stretches): bars grouped
     into sections where the loudness jumps by more than `jump`; sections of at least min_bars whose
     loudness is within `rel` of the loudest section; at most max_share of the song (the loudest
@@ -270,7 +270,7 @@ def transcribe(mix, stems, credit=""):
         root = librosa.note_to_midi(n.rstrip("m5") + "2")
         guitar.append(dict(t=round(g["t"], 3), dur=g["dur"], root=int(root), chord=n, dir="down" if down else "up", accent=g["vel"] > 100))
     return dict(bpm=round(bpm, 2), duration=round(duration, 3), beats=[round(float(b), 3) for b in bt], holes=holes(y),
-                peaks=peaks(y, [float(b) for b in bt]),
+                peaks=loud_parts(y, [float(b) for b in bt]),
                 sections=sections(y, 4 * spb, duration, float(bt[0]) if len(bt) else 0.0), credit=credit,
                 drums=[dict(beat=None, piece=d["piece"], vel=d["vel"], t=round(d["t"], 3)) for d in dr],
                 bass=[dict(t=round(b["t"], 3), dur=b["dur"], pitch=b["pitch"], vel=b["vel"]) for b in bass],

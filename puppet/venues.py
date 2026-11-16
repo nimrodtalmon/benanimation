@@ -48,13 +48,15 @@ class Venue:
 
     def cast_mask(self, frame):
         import cv2
-        m = (np.abs(frame - self._bg).max(-1) > 0.003).astype(np.float32)
+        d = cv2.absdiff(frame, self._bg)
+        m = cv2.max(cv2.max(d[..., 0], d[..., 1]), d[..., 2])
+        m = (m > 0.003).astype(np.float32)
         return cv2.GaussianBlur(m, (0, 0), 1.5)[..., None]
 
     def light_cast(self, frame, mult):
         """Multiply only the cast's pixels by mult (H x W x 3 or 3,)."""
         m = self.cast_mask(frame)
-        frame[:] = frame * (1 - m) + frame * np.asarray(mult, np.float32) * m
+        frame *= 1 + m * (np.asarray(mult, np.float32) - 1)
 
 
 class Club(Venue):

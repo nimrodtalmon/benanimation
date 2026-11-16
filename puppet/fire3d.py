@@ -24,6 +24,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import blendkit as bk  # noqa: E402
 
+BUILD = 13  # bump when the Blender side changes (renders are cached by spec + BUILD)
 ROOT = bk.ROOT
 
 
@@ -32,7 +33,7 @@ def spec_of(name):
 
 
 def cache_dir(name):
-    return bk.cache_dir("fire", name, spec_of(name), os.path.abspath(__file__), bk.__file__)
+    return bk.cache_dir("fire", name, spec_of(name), BUILD)
 
 
 # ---------------------------------------------------------------- Blender side

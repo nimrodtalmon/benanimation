@@ -7,7 +7,7 @@
 import os
 import sys
 
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 sys.path.insert(0, f"{ROOT}/puppet")
 from cast.coriander import Guitarist  # noqa: E402
 from cast.distor import Singer  # noqa: E402

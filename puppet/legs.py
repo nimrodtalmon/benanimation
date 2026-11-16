@@ -10,7 +10,6 @@ knees bend toward the travel direction, 60% stance (double support), the bob is 
 (lowest just after contact) with the depth the legs need, soft IK so a leg never snaps straight,
 and the Path cruises at a constant speed (Path(..., ramp=0.5)).
 """
-import math
 
 import numpy as np
 

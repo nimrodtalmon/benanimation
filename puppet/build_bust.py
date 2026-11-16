@@ -22,7 +22,7 @@ import cv2
 import numpy as np
 
 import photo
-from standins import arc, capsule, fill, stroke
+from standins import capsule, fill, stroke
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 

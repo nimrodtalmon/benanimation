@@ -19,12 +19,12 @@ import math
 import os
 import sys
 
-import cv2
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import blendkit as bk  # noqa: E402
 
+BUILD = 13  # bump when the Blender side changes (renders are cached by spec + BUILD)
 ROOT = bk.ROOT
 
 
@@ -33,12 +33,11 @@ def spec_of(name):
 
 
 def cache_dir(name):
-    return bk.cache_dir("scene", name, spec_of(name), os.path.abspath(__file__), bk.__file__)
+    return bk.cache_dir("scene", name, spec_of(name), BUILD)
 
 
 # ---------------------------------------------------------------- Blender side
 def _needle_mat(name, rng):
-    import bpy
     m, n, b = bk.material(name, (0.02, 0.035, 0.015), 0.65)
     uv = n.node("ShaderNodeTexCoord").outputs["UV"]
     u, v, _ = n.xyz(uv)
@@ -239,7 +238,6 @@ def _ground_mat(name, base=(0.035, 0.03, 0.02)):
 
 
 def _grass(ground, count, length, mat):
-    import bpy
     ps = ground.modifiers.new("grass", "PARTICLE_SYSTEM").particle_system.settings
     ps.type = "HAIR"
     ps.count = count

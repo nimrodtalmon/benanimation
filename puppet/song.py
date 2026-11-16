@@ -1,8 +1,8 @@
 """A song for a clip: the score (drums, strums, sung notes, mouth shapes; a JSON like
-src/song.json) plus the audio and an aligned vocal-only track. Characters read every timing
+public/song/song.json) plus the audio and an aligned vocal-only track. Characters read every timing
 from here, so a new clip only needs a new Song.
 
-  song = Song("src/song.json", audio="public/song/song.wav", vocals="public/song/vocals.wav",
+  song = Song("public/song/song.json", audio="public/song/song.wav", vocals="public/song/vocals.wav",
               credit="Song: ... (license)")
 """
 import json
@@ -31,7 +31,7 @@ class Song:
 
     @classmethod
     def default(cls):
-        return cls("src/song.json", "public/song/song.wav", "public/song/vocals.wav",
+        return cls("public/song/song.json", "public/song/song.wav", "public/song/vocals.wav",
                    "Song: 'silence in the air' by JeffSpeed68 (ccmixter.org, CC BY-NC 3.0) + our drums")
 
     @classmethod

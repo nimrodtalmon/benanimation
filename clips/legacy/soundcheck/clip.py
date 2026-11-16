@@ -8,7 +8,7 @@ Same song as clip 1. Uses only toolkit features (walk, stand + grab, light cues,
 import os
 import sys
 
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 sys.path.insert(0, f"{ROOT}/puppet")
 from cast.distor import Singer  # noqa: E402
 from motion import Path  # noqa: E402

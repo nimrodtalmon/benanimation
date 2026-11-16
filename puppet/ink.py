@@ -127,6 +127,38 @@ def draw(img, alpha=None, st=None, scale=1.0):
     return np.concatenate([out, L.alpha], 2).astype(np.float32)
 
 
+def lookup(path, scale=1.0):
+    """The flattened version of an image file if it is already cached (no need to read the file)."""
+    if _style is None or not os.path.exists(path):
+        return None
+    k = f"('flat', '{path}'):{os.path.getmtime(path)}|{_style}|{scale}|file"
+    p = f"{ROOT}/out/inkcache/{hashlib.sha1(k.encode()).hexdigest()[:16]}.png"
+    return cv2.imread(p, cv2.IMREAD_UNCHANGED).astype(np.float32) / 255 if os.path.exists(p) else None
+
+
+def store(path, out, scale=1.0):
+    k = f"('flat', '{path}'):{os.path.getmtime(path)}|{_style}|{scale}|file"
+    p = f"{ROOT}/out/inkcache/{hashlib.sha1(k.encode()).hexdigest()[:16]}.png"
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    cv2.imwrite(p, (np.clip(out, 0, 1) * 255).astype(np.uint8))
+
+
+def flat_file(path, scale=1.0):
+    """An image file (RGBA PNG) with flattened colors, cached by path: reads only the cache when it can."""
+    out = lookup(path, scale)
+    if out is not None:
+        return out
+    im = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+    im = im.astype(np.float32) / (65535.0 if im.dtype == np.uint16 else 255.0)
+    if _style is None:
+        return im
+    out = flat(im[..., :3], scale=scale)
+    if im.shape[2] == 4:
+        out = np.concatenate([out, im[..., 3:4]], 2)
+    store(path, out, scale)
+    return out
+
+
 def flat_cached(key, img, alpha=None, scale=1.0):
     """Only the colors (the outlines are already drawn by the builder), cached like cached()."""
     if _style is None:

@@ -10,7 +10,7 @@ footsteps), shared walking legs (puppet/legs.py), fluid motion, the HandDrawn fi
 import os
 import sys
 
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 sys.path.insert(0, f"{ROOT}/puppet")
 from cast.distor import Singer  # noqa: E402
 from cast.pepper import Drummer  # noqa: E402

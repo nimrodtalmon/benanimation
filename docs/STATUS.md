@@ -1,16 +1,37 @@
-# Status and next steps (handoff, Nov 14 2026)
+# Status (handoff, Nov 16 2026)
 
-Read this first in a new session, then `docs/TOOLKIT.md` (pipeline + lessons).
+New session: read `docs/GUIDE.md` (how to make a clip), then this file; `docs/TOOLKIT.md` has the pieces and lessons.
 
-## Clips
-- `clips/silence` (clip 1): the band to "silence in the air" — Distor sings, Pepper drums, Coriander on guitar.
-- `clips/soundcheck` (clip 2): Distor walks in, takes the mic.
-- `clips/arrival` (clip 3): Distor and Pepper walk in, a cut hides her sitting down, hi-hat count-in, the band.
-- `clips/motiontest`: walk + one sung line, options A-E (motion study).
-- `clips/band2` (clip 4): clip 1's story in the chosen style (C + D + E, a bit more camera: drift 0.065, crash kicks 0.035, roll 0.5).
+## Now
+- Current clips (all `Show`-based, song dr1 by the band Distorted Reality): `clips/distorted` (club), `clips/campfire`
+  (walk in the woods, then a 3D fire at night), `clips/rooftop` (city rooftop at night, drawn 3D look; Nimrod: "very
+  nice"). `clips/silence_band`: the same band to "silence in the air" (CC BY-NC; keep the credit).
+- The look he chose: 2.5D drawn (`style3d="ben"`): Ben's drawings as puppets, every 3D part outlined and flattened.
+- Speed (2 CPUs): ~0.7 s per frame for band shots, ~0.4 s for cached close-ups (`tools/profile_clip.py`); a 3-min
+  clip ~1 h with two halves in parallel. New close-ups ~20 s a frame in Blender, rendered on threes.
+- Checks: `tools/smoke.py` (one frame of each shot kind per clip), `ruff check --select F,E9 puppet tools clips`.
+- Old clips (Production API with Revoy's Pepper/Coriander, motion and style studies) are in `clips/legacy/`; the
+  first Remotion version in `legacy/remotion/` (not maintained).
+
+## Open issues / ideas
+1. Ben's 3/4 and side drawings for walks (upload app talmonlab.bgu.ac.il/ben/); front-only rigs walk stiffly.
+2. Close-up hands are generic (MakeHuman), colored from the rig; no close-ups of singers' faces yet.
+3. Venues are hand-written classes; a new place = a new builder (copy `city3d.py`) + a Venue class (GUIDE §4).
+4. Memory: ~2.6 GB per render process; two in parallel fit, more do not.
+
+---
+
+# History of the rounds (Nov 2026)
+
+## Clips (rounds 1-5)
+- `clips/legacy/silence` (clip 1): the band to "silence in the air" — Distor sings, Pepper drums, Coriander on guitar.
+- `clips/legacy/soundcheck` (clip 2): Distor walks in, takes the mic.
+- `clips/legacy/arrival` (clip 3): Distor and Pepper walk in, a cut hides her sitting down, hi-hat count-in, the band.
+- `clips/legacy/motiontest`: walk + one sung line, options A-E (motion study).
+- `clips/legacy/band2` (clip 4): clip 1's story in the chosen style (C + D + E, a bit more camera: drift 0.065, crash kicks 0.035, roll 0.5).
 - `clips/distorted` (clip 5): Ben's band Distorted Reality plays their own song (instrumental, recorded by the band; `public/songs/dr1`).
   Distor on drums (`cast/distor_drums.py`), the blonde on guitar and the boy from the band page on bass (`cast/bust_player.py`).
-- `clips/stylereel`: the same 10 s of the band (song 18-28 s) in many styles; round 1 = styles 1-7, round 2 = A-E (11-15).
+- `clips/legacy/stylereel`: the same 10 s of the band (song 18-28 s) in many styles; round 1 = styles 1-7, round 2 = A-E (11-15).
 
 ## What Nimrod liked / decided
 - Motion: fluid mode (`Singer(fluid=True)`), the 3/4 walk, calm heads; the line boil only a little (HandDrawn default boil 0.4).
@@ -69,7 +90,7 @@ Read this first in a new session, then `docs/TOOLKIT.md` (pipeline + lessons).
   drawn guitar. lp_cherry (single-cut, cherry sunburst), pbass_blue (P-bass style, blue burst, maple neck).
 - Faces: `motion.Smoothed` = an expression curve over the whole song, Gaussian-smoothed per key (eases in and out,
   anticipates events); no squint per strum. Used by BustPlayer, Portrait, Drummer.
-- Peaks: `transcribe.peaks` finds the song's biggest sections (loudness plateaus within 3% of the loudest, at most half
+- Peaks: `transcribe.loud_parts` finds the song's biggest sections (loudness plateaus within 3% of the loudest, at most half
   the song) -> score "peaks"; Groove style "mix" goes all-out there: head-banging on every beat (snap down, tip
   forward, slower up; harder on bar starts), hard body rocking, bar-start dips; eased in/out at the edges.
 
@@ -162,13 +183,5 @@ Read this first in a new session, then `docs/TOOLKIT.md` (pipeline + lessons).
 - band2: TV effect too much (keep as a dial: `TVStatic(amount, vhs)`); drummer hand looked detached -> fixed (hand sits in the cuff).
 - Ben's band: Distor = drummer, blonde = guitarist (sings most in songs with vocals; all of them sing), bassist = left boys of the band page.
 
-## Next steps
-1. Done (Nov 14): `clips/band2`, full song in the chosen style; waiting for Nimrod's feedback.
-2. Ben's new pages (app: talmonlab.bgu.ac.il/ben/): head and body turned halfway (3/4) for walking; when they arrive, add a 3/4 body to `Singer` for walks.
-3. Clint Eastwood ideas not done yet: repeat short bits forward/backward on the beat ("rock and roll"), freeze frames with titles,
-   a camera "ladder" over the song (`Production(drift=lambda t: ...)`), smears on drum hits.
-4. Expressions on Revoy's painted guitarist are subtle (small face); Pepper's read well.
-
-## Practical
-- Render: ~3-6 fps on 2 CPUs; a 10 s excerpt ~4-6 min, the 44 s song ~8-12 min (two halves in parallel).
-- `tools/jerk.py` measures motion smoothness; check stills before sending videos.
+## Ideas from Nov 14 (some done since in Show: freezes, tape tricks, camera ladder)
+- Repeat short bits forward/backward on the beat ("rock and roll"), smears on drum hits.

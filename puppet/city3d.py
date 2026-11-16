@@ -23,6 +23,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import blendkit as bk  # noqa: E402
 
+BUILD = 13  # bump when the Blender side changes (renders are cached by spec + BUILD)
 ROOT = bk.ROOT
 
 
@@ -32,7 +33,7 @@ def spec_of(name):
 
 def cache_dir(name):
     st = bk.style()
-    d = bk.cache_dir("city", name + (f"@{st}" if st else ""), spec_of(name), os.path.abspath(__file__))
+    d = bk.cache_dir("city", name + (f"@{st}" if st else ""), spec_of(name), BUILD)
     return d
 
 
@@ -289,24 +290,25 @@ class City3D:
         self.win_gain = 0.3
         self.exposure = 0.14 / max(1e-5, float(np.percentile(self.base.max(-1)[land], 85)))
         import ink
-        self.lines = None
+        disp = bk.tonemap(self.base / np.maximum(self.alpha, 1e-3), self.exposure)[..., ::-1]
         if ink.active():  # outlines are in the render; flatten its colors once (windows are lights: leave them)
-            disp = bk.tonemap(self.base / np.maximum(self.alpha, 1e-3), self.exposure)[..., ::-1]
-            self.flat = ink.flat_cached(f"{d}/base.npy", disp, self.alpha[..., 0])[..., :3]
-        else:
-            self.flat = None
+            disp = ink.flat_cached(f"{d}/base.npy", disp, self.alpha[..., 0])[..., :3]
+        # everything per frame is a cheap mix of images made here once
+        self.land = np.ascontiguousarray(disp, np.float32)
+        self.win_disp = np.ascontiguousarray(bk.tonemap(self.win * self.win_gain, self.exposure)[..., ::-1], np.float32)
+        self.winid = self.winid.astype(np.float32)
+        del self.base, self.win
 
     def frame(self, frame, windows=1.0, blackout=0.0, sky=None, flicker=None):
         """windows: the share of windows lit (in their random order); blackout: 0..1 dims the whole city's
         light (windows and glow) for a break; sky: BGR image behind."""
-        on = (self.winid < windows) & (self.winid > 0)
-        wl = self.win * on[..., None] * (1 - blackout) * self.win_gain
-        if self.flat is not None:
-            land = self.flat * (1 - 0.55 * blackout) + bk.tonemap(wl, self.exposure)[..., ::-1]
-        else:
-            land = bk.tonemap((self.base * (1 - 0.55 * blackout) + wl) / np.maximum(self.alpha, 1e-3), self.exposure)[..., ::-1]
+        on = ((self.winid < windows) & (self.winid > 0)).astype(np.float32)[..., None]
+        land = self.land * (1 - 0.55 * blackout) + self.win_disp * on * (1 - blackout)
         a = self.alpha
-        frame[:] = np.clip(land, 0, 1) * a + (sky if sky is not None else 0.0) * (1 - a)
+        if sky is None:
+            frame[:] = np.minimum(land, 1.0) * a
+        else:
+            frame[:] = np.minimum(land, 1.0) * a + sky * (1 - a)
         return frame
 
 

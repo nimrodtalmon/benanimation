@@ -1,8 +1,9 @@
 # Animating Ben's drawings: the toolkit
 
 The aim is reusable code for turning Ben's marker drawings into good animation, not one clip.
-`clips/silence/clip.py` is one production built with it. This file says what each piece does, how to
-add a new character, and what we learned.
+For making a clip start with `docs/GUIDE.md` (current workflow: rigs + `Show` + venues + 3D builders). This file
+describes the lower-level pieces (warp puppets, limbs, hands, motion, Production) and the lessons learned. Sections
+below the "Lessons" mention clips now in `clips/legacy/`.
 
 ## Layout
 
@@ -81,6 +82,24 @@ timing from `song` (never from a global), so it works in any clip with any song.
    `motion.py` for the timing, IK for the arms, `hand.py` for anything held.
 6. Add the character to a clip's CAST. Run `clip.py stills ...` and look at the frames before
    `clip.py video`.
+
+## Checking a rig
+
+`python3 tools/rig_overlay.py <rig>` -> `out/rig_<rig>.jpg`: head ellipses, face, eyes, the mouth line (red; must
+sit on the drawn lips, else the chin opens), chin line, pivot, shoulders, on the drawing itself.
+
+## Lessons from the 3D rounds (Nov 15-16)
+
+- **One look for the whole clip.** Drawn puppets next to rendered 3D read as two films. Draw the 3D too: outlines
+  from geometry (Freestyle) + flattened colors (`ink.py`), no depth of field.
+- **Hands:** stick-skeleton hands (skin modifier, capsules) look like clay whatever the shader; a real mesh with
+  real weights (MakeHuman, CC0) + dual-quaternion skinning fixed it. Place a hand by what it holds (the pick, the
+  stick), then let the fingers reach.
+- **Builders:** cache by spec + a BUILD number, not by the source file's hash (editing the 2D side must not
+  re-render an hour of Blender). Always fall back to the newest finished render.
+- **Memory:** two render processes in parallel fit in ~5 GB only if big layers are float16/uint8 and frame caches
+  are small.
+- **Speed:** precompute everything static per venue in `__init__`; per frame only mix passes.
 
 ## Lessons so far
 

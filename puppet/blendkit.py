@@ -15,8 +15,10 @@ import numpy as np
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def cache_dir(kind, name, spec, *sources):
-    h = hashlib.sha1(json.dumps(spec, sort_keys=True).encode() + b"".join(open(s, "rb").read() for s in sources)).hexdigest()[:10]
+def cache_dir(kind, name, spec, build):
+    """Where a builder's render lives: keyed by the spec and the builder's BUILD number (bump it when
+    the Blender side changes; edits to the 2D side keep the renders)."""
+    h = hashlib.sha1(json.dumps(spec, sort_keys=True).encode() + str(build).encode()).hexdigest()[:10]
     return f"{ROOT}/out/{kind}cache/{name}-{h}"
 
 

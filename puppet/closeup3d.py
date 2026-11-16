@@ -36,6 +36,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FPS = 10  # on threes
+BUILD = 13  # bump when the Blender side (build and what it calls) changes: cached renders are keyed by it, not by this file
 
 # finger skeleton (meters): MCP knuckle (forward, lateral toward the index side), bone lengths, radii
 FINGERS = dict(index=((0.090, 0.024), (0.043, 0.026, 0.020), (0.0098, 0.0080)),
@@ -123,10 +124,13 @@ def closeup_job(song, rig, kind, t0, t1, light="fire", res=(1280, 720), samples=
 
 
 def job_dir(job):
-    spec = f"{ROOT}/public/kits/{job['model']}.json" if job.get("family") == "kit" else f"{ROOT}/public/instruments/{job['model']}.json"
-    builder = f"{ROOT}/puppet/kit3d.py" if job.get("family") == "kit" else f"{ROOT}/puppet/guitar3d.py"
-    src = b"".join(open(f, "rb").read() for f in (os.path.abspath(__file__), builder, spec))
-    h = hashlib.sha1(json.dumps(job, sort_keys=True).encode() + src).hexdigest()[:12]
+    """The cache of a job: its spec, the instrument/kit spec and the BUILD numbers of the builders."""
+    import guitar3d
+    import kit3d
+    kit = job.get("family") == "kit"
+    spec = f"{ROOT}/public/kits/{job['model']}.json" if kit else f"{ROOT}/public/instruments/{job['model']}.json"
+    vers = f"{BUILD}/{kit3d.BUILD if kit else guitar3d.BUILD}"
+    h = hashlib.sha1(json.dumps(job, sort_keys=True).encode() + open(spec, "rb").read() + vers.encode()).hexdigest()[:12]
     return f"{ROOT}/out/closeupcache/{job['rig']}-{job['kind']}-{h}"
 
 
@@ -157,11 +161,12 @@ class CloseUp:
             if len(self.frames) > 6:  # keep memory small: each frame is a full float image
                 self.frames.clear()
             f = f"{self.d}/f_{i:04d}.png"
-            im = cv2.imread(f, cv2.IMREAD_UNCHANGED)
-            im = im.astype(np.float32) / (65535.0 if im.dtype == np.uint16 else 255.0)
-            if self.job.get("style"):  # outlines were drawn in Blender; flatten the colors to match
+            if self.job.get("style"):  # outlines were drawn in Blender; flatten the colors to match (cached)
                 import ink
-                im = ink.flat_cached(f, im[..., :3], im[..., 3])
+                im = ink.flat_file(f)
+            else:
+                im = cv2.imread(f, cv2.IMREAD_UNCHANGED)
+                im = im.astype(np.float32) / (65535.0 if im.dtype == np.uint16 else 255.0)
             self.frames[i] = im
         return self.frames[i]
 

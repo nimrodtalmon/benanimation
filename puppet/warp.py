@@ -52,7 +52,7 @@ def load(path, scale):
 
 # ---------- drivers from the song ----------
 def drivers(start, n):
-    song = json.load(open(f"{ROOT}/src/song.json"))
+    song = json.load(open(f"{ROOT}/public/song/song.json"))
     sr = 16000
     raw = subprocess.run(["ffmpeg", "-loglevel", "error", "-i", f"{ROOT}/public/song/vocals.wav", "-f", "f32le", "-ac", "1", "-ar", str(sr), "-"],
                          capture_output=True).stdout
