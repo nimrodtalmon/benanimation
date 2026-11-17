@@ -4,3 +4,4 @@ out/
 public/clip/*.m4a
 __pycache__/
 public/songs/hunt/*.mp3
+public/songs/achzar/*.mp3

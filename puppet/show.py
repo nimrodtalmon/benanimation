@@ -379,7 +379,8 @@ class Show:
         return Production(self.song, self._cast, self.shots, name=self.name, script=self.script,
                           look=Looks(HandDrawn(), TVStatic(self.tv[0], vhs=self.tv[1])), stage=self.venue.stage(self.song), crowd_wide=False, cue=self.cue,
                           drift=lambda a: 0.015 if a < b0 else (0.05 if a < b0 + 0.35 * (self.end - b0) else (0.065 if a < b0 + 0.7 * (self.end - b0) else 0.09)),
-                          parallax=0.55, ghost=0.35, backdrop=self.backdrop, fore=self.fore, post=self.post, marker=self.marker)
+                          parallax=0.55, ghost=0.35, backdrop=self.backdrop, fore=self.fore, post=self.post, marker=self.marker,
+                          keep_bg=getattr(self.venue, "keep_bg", None))
 
 
 def rock(a, spb):

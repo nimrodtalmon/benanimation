@@ -276,7 +276,7 @@ class HandDrawn:
 class Production:
     def __init__(self, song, cast, shots, name, crowd_in=(), zoom_wide=(1.04, 1.0), zoom=(1.0, 1.05), script=None, cue=None,
                  look=None, twos=False, crowd_wide=True, drift=0.0, parallax=None, ghost=0.0, stage="stage", punch=None, roll=0.0,
-                 backdrop=None, fore=None, post=None, marker=1.0):
+                 backdrop=None, fore=None, post=None, marker=1.0, keep_bg=None):
         """look: a HandDrawn finish (or None); twos: characters move on twos (15 drawings a second,
         the camera and lights stay smooth), the cadence of hand-drawn 2D."""
         self.song, self.cast_f, self.shots, self.name = song, cast, shots, name
@@ -298,6 +298,9 @@ class Production:
         # the wall's parallax); fore(frame, t, shot) in front of them (haze, flashes); post(img, t)
         # on the finished 8-bit picture, outside the camera (titles)
         self.backdrop, self.fore, self.post = backdrop, fore, post
+        # keep_bg(frame): told the finished background (after the parallax warp), right before the
+        # cast is drawn, so a venue can tell cast pixels from the stage (Venue.cast_mask)
+        self.keep_bg = keep_bg
         props.set_marker(marker)  # how hand-drawn the code-drawn props look (1 = marker style, 0 = closer to real)
         self.cast = {}
         self.stage = Stage(song, stage) if isinstance(stage, str) else stage  # or any object with frame(t, wide, cue) and .dark
@@ -317,7 +320,7 @@ class Production:
 
     def frame(self, t, f, rng):
         """A shot is (t0, t1, who) or (t0, t1, who, opts); opts: zoom=(start, end), focus=(x, y) or
-        focus(t) -> (x, y) for a pan."""
+        focus(t) -> (x, y) for a pan; drift, punch, roll, twos, look: this shot's own (see __init__)."""
         a, b, shot, opts = self.shot_at(t)
         if "tmap" in opts:  # editing tricks: tmap(t) -> the moment shown (a freeze frame, a loop played back and forth)
             t = opts["tmap"](t)
@@ -338,17 +341,23 @@ class Production:
             focus = (focus[0] + (k - 0.5) * drift * W * (1 if i % 2 == 0 else -1), focus[1])
             zoom = (zoom[0] + drift, zoom[1] + drift)  # room for the move
         z = zoom[0] + (zoom[1] - zoom[0]) * k
-        if self.punch is not None:
-            times, amt = self.punch
+        punch = opts.get("punch", self.punch)  # opts punch=(times, amount): this shot's own kicks
+        if punch is not None:
+            times, amt = punch
             i = np.searchsorted(times, t, side="right") - 1
             if i >= 0 and times[i] >= a:  # only accents inside this shot
                 u = t - times[i]
                 z *= 1 + amt * (min(1.0, u / 0.06) if u < 0.06 else math.exp(-(u - 0.06) / 0.35))
-        roll = self.roll * math.sin(2 * math.pi * t / 7.0) if self.roll else 0.0
+        rl = opts.get("roll", self.roll)  # opts roll: this shot's own sway (degrees)
+        roll = rl * math.sin(2 * math.pi * t / 7.0) if rl else 0.0
+        if "roll" in opts and rl:  # a shot's own roll is handheld: a faster sway on top
+            roll += 0.35 * rl * math.sin(2 * math.pi * t / 1.3)
         if self.parallax is not None:
             frame = self.parallax_bg(frame, z, (focus[0] + 8 * math.sin(t * 0.8), focus[1]))
+        if self.keep_bg is not None:
+            self.keep_bg(frame)
         who = self.who(shot)
-        tc, fc = (math.floor(t * 15) / 15, (f // 2) * 2) if self.twos else (t, f)
+        tc, fc = (math.floor(t * 15) / 15, (f // 2) * 2) if opts.get("twos", self.twos) else (t, f)  # opts twos: this shot on twos
         for w in who:
             if hasattr(w, "advance"):
                 w.advance(fc)
@@ -361,7 +370,10 @@ class Production:
             frame = stage_light(frame, t)
         if self.ghost > 0:
             frame = self.blend_ghost(frame, (a, shot))
-        if self.look is not None and opts.get("look", True):  # opts look=False: no paper/TV look (e.g. 3D close-ups)
+        lk = opts.get("look", True)  # opts look=False: no paper/TV look (e.g. 3D close-ups); a callable: this shot's own look
+        if callable(lk):
+            frame = lk(frame, f)
+        elif self.look is not None and lk:
             frame = self.look(frame, f)
         credit = list(dict.fromkeys([w.j["credit"] for w in who])) + [self.song.credit]
         img = finish(frame, t, 0, 1, rng, credit, zoom=(z, z), focus=focus, vignette=getattr(self.stage, "vignette", 0.45 if self.stage.dark else 0.12), roll=roll)

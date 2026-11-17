@@ -5,14 +5,15 @@ Wilds3D, drawn in the ink style), with the light, the sky and the weather follow
 
 moods: the light of the moment (crossfaded): MOODS below ("dawn", "day", "red", "storm", "ash",
   "blood", "night"), each a sky (puppet/skies.py) and how the land and the cast are lit.
-weather (all optional): rain/ash/embers/smoke/blaze: [(t, amount), ...] keyframes (linear);
+weather (all optional): rain/ash/embers/smoke/blaze/silhouette: [(t, amount), ...] keyframes (linear);
   strikes: [(t, x)] lightning; birds: [(t, (x, y), toward)] flocks; shots: [t] gunshot flashes.
 giant: a factory for a cast member drawn huge BEHIND the trees in "giant" shots (between the
   far mountains and the near trees).
 
 Which view a shot gets comes from its cast names: "land*" (the land alone, side-on, scrolling),
 "walk*" (side-on, scrolling: walking busts), "full*" (side-on, still camera: someone walks
-across), "giant*" (side-on, low horizon, the giant behind the trees); anything else: the clearing.
+across), "giant*" (side-on, low horizon, the giant behind the trees), "panel*" (story.Panels draws
+everything); anything else: the clearing.
 """
 import math
 
@@ -98,7 +99,7 @@ class Wilds(Venue):
     @staticmethod
     def kind(shot):
         names = shot if isinstance(shot, tuple) else (shot,)
-        for p in ("land", "walk", "full", "giant"):
+        for p in ("land", "walk", "full", "giant", "panel"):
             if any(str(n).startswith(p) for n in names):
                 return p
         return "clearing"
@@ -114,6 +115,8 @@ class Wilds(Venue):
     def frame(self, t, wide, cue):
         shot = cue["shot"]
         kd = self.kind(shot)
+        if kd == "panel":  # comic panels (story.Panels) draw the whole picture
+            return np.zeros((H, W, 3), np.float32)
         sky, tint, sun, moon, blaze, _ = self.mood(t)
         f = np.empty((H, W, 3), np.float32)
         if kd == "clearing":
@@ -140,7 +143,7 @@ class Wilds(Venue):
 
     def backdrop(self, frame, t, shot):
         b = key(self.wx_spec.get("blaze", []), t)  # the woods burning behind the cast
-        if b > 0:
+        if b > 0 and self.kind(shot) != "panel":
             kd = self.kind(shot)
             wx.blaze(frame, t, b * self.flicker(t), y=H * {"clearing": 0.62, "giant": 0.8}.get(kd, 0.72))
         self.keep_bg(frame)
@@ -148,9 +151,16 @@ class Wilds(Venue):
     def fore(self, frame, t, shot):
         w = self.wx_spec
         kd = self.kind(shot)
+        if kd == "panel":
+            return
         _, tint, sun, moon, blaze, cast = self.mood(t)
         fl = self.lightning.flash(t)
         g = self.gunflash(t)
+        import story
+        si = key(w.get("silhouette", []), t)
+        if si > 0:  # the cast as black cut-outs against the sky, a rim of fire light (glowing eyes stay)
+            story.silhouette(frame, self.cast_mask(frame), si)
+        story.EMIT.clear()
         self.light_cast(frame, cast * (1 + 0.8 * fl) + np.array([0.3, 0.6, 0.9], np.float32) * g)
         if kd in ("walk", "full"):
             self.scn.ferns(frame, self.walk_speed * t if kd == "walk" else 0.0, tint)

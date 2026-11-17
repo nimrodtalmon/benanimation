@@ -106,7 +106,12 @@ For a different story, either:
   `post()` (titles); shot opts: `zoom=(a, b)`, `focus=(x, y)` or `focus(t)`, `tmap(t)` (freeze/loop),
   `whip=±1`, `look=False`.
 - A story clip (not a band show): subclass `Show`, add cast in `make_cast()` and write `plan()` act by act from the
-  song's times (see `clips/hunt/clip.py`: a `run(a, b, cycle, n)` helper cuts n-bar shots taking turns).
+  song's times (see `clips/hunt/clip.py`, `clips/achzar/clip.py`). `puppet/story.py` has the pieces: `cuts()` /
+  `beat_cuts()` (n-bar / n-beat shots taking turns), `Empty`, `Rising`, `Panels` (comic panels: several shots at once),
+  `Duotone` (a two-ink print look), `silhouette()` + `emit()` (black cut-outs; glowing eyes shine through), `label()`.
+- Per-shot opts (Production): `zoom`, `focus`, `drift`, `punch=(times, amount)`, `roll` (handheld sway), `twos` (on
+  twos), `look` (False, or a look of its own, e.g. `story.Duotone()` or `Looks(HandDrawn(), TVStatic(0.14, vhs=0.9))`),
+  `whip`, `tmap`. `clips/achzar` tries a different way of filming in each part (captioned) to compare them.
 - For something not band-shaped at all, use `Production` directly (see `clips/legacy/` for examples).
 
 ## 6. One look: drawn

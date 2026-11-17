@@ -10,7 +10,7 @@ poses (a schedule; hands ease between them):
   with a muzzle flash and a puff of smoke
 - "god": no rifle; his arms spread wide and up, hands open
 sing: when his mouth follows the vocal track (else it stays shut). god(t): how far he is gone
-(glowing eyes, a dark aura); a number or a function of t.
+(glowing eyes, a dark aura in wide framings); a number or a function of t.
 """
 import math
 
@@ -28,7 +28,7 @@ GRIP = np.array([0.0, 0.44, -0.115])  # where a held stick sits in the fist (han
 class Hunter(Singer):
     LEN = 1.75  # the rifle's length in shoulder widths (his arms are short: a cartoon rifle)
     def __init__(self, song=None, scale=0.5, cx=W / 2, top=60, walk=None, poses=((0.0, "carry"),), shots=(), sing=(), god=0.0,
-                 rifle="rifle", fluid=True, head=0.8, flash=1.0):
+                 rifle="rifle", fluid=True, head=0.8, flash=1.0, aura=None):
         super().__init__(song, scale=scale, cx=cx, top=top, walk=walk, fluid=fluid, head=head, pump_after=1e9)
         from prop3d import Prop3D
         self.rifle = Prop3D(rifle)
@@ -36,6 +36,7 @@ class Hunter(Singer):
         self.shots = np.array(sorted(shots), float)
         self.god = god if callable(god) else (lambda t, g=float(god): g)
         self.flash_k = flash
+        self.aura = (scale < 0.7) if aura is None else aura  # the dark aura reads in wide framings; close up it would cover the frame
         n = len(self.env)
         mask = np.zeros(n, np.float32)
         for a, b in sing:
@@ -190,19 +191,22 @@ class Hunter(Singer):
 
     def draw(self, frame, t):
         g = float(self.god(t))
-        if g > 0.01:  # a dark aura behind him
+        if g > 0.01 and self.aura:  # a dark aura behind him
             self._aura(frame, t, g)
         super().draw(frame, t)
         if g > 0.01:
             self._eyes(frame, t, g)
+            import story
+            story.emit(lambda fr, t=t, g=g: self._eyes(fr, t, g))
 
     def _aura(self, frame, t, g):
         cx = self.x0 + self.wl / 2
-        cy = self.top + 0.35 * self.wl
+        cy = self.top + 0.3 * self.wl
         lay = np.zeros((H // 4, W // 4), np.float32)
-        r = int(self.wl * 0.75 / 4 * (1 + 0.04 * math.sin(t * 3)))
+        r = int(self.wl * 0.42 / 4 * (1 + 0.04 * math.sin(t * 3)))
         cv2.ellipse(lay, (int(cx / 4), int(cy / 4)), (r, int(r * 1.5)), 0, 0, 360, 1.0, -1)
-        lay = cv2.resize(cv2.GaussianBlur(lay, (0, 0), r * 0.45 + 1), (W, H))[..., None]
+        lay = cv2.resize(cv2.GaussianBlur(lay, (0, 0), r * 0.45 + 1), (W, H))
+        lay = np.clip((lay - 0.03) / 0.97, 0, 1)[..., None]  # no faint tails over the whole frame (venues tell the cast by what changed)
         frame[:] = frame * (1 - 0.6 * g * lay) + g * lay * np.array([0.02, 0.0, 0.18], np.float32)
 
     def _eyes(self, frame, t, g):

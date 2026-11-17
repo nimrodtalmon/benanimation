@@ -23,6 +23,12 @@ New session: read `docs/GUIDE.md` (how to make a clip), then this file; `docs/TO
   State: stills and a 14 s segment checked; full render waiting for Nimrod's OK; song credit still unknown.
   Note: scenery3d "far" was rebuilt alone after a fix (camera clip_end) without a BUILD bump.
 
+- New (Nov 17, round 15): `clips/achzar`, Nimrod's own song (Hoodska, "Tsayad Achzar"; his rights; the mp3 is kept
+  out of the public repo until he says otherwise), the hunt story with six captioned experiments: classic cuts, long
+  takes, comic panels, beat cuts, noir duotone on twos, silhouettes on worn tape. Waiting for his picks.
+  Fix: Production now tells the venue the background after the parallax warp (`keep_bg`), so `light_cast` /
+  `cast_mask` see only the cast (before, the warp made every pixel look like cast: whole-frame tints).
+
 ## Open issues / ideas
 1. Ben's 3/4 and side drawings for walks (upload app talmonlab.bgu.ac.il/ben/); front-only rigs walk stiffly.
 2. Close-up hands are generic (MakeHuman), colored from the rig; no close-ups of singers' faces yet.
