@@ -19,6 +19,7 @@ import math
 import os
 import sys
 
+import cv2
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -564,42 +565,50 @@ class Wilds3D:
             self.c_lines = ink.Lines(base, self.c_alpha[..., 0])
         self.blaze_px = [(x, y + sh) for x, y in self.meta.get("blaze_px", [])]
 
-    def _scroll(self, frame, img, off, tint, y=0):
+    DEPTH = {"far": 0.25, "mid": 0.55, "near": 1.0, "ferns": 1.35}  # how much each layer moves with the camera
+
+    def _scroll(self, frame, img, off, tint, y=0, z=1.0, c=None):
+        """One layer, scrolled by off, pushed down by y, scaled by z about c (a camera dolly)."""
         Hh, Ww = frame.shape[:2]
         h, w = img.shape[:2]
         idx = (np.arange(Ww) + int(off)) % w
         lay = img[:Hh, idx].astype(np.float32)
-        if y:
-            lay = np.roll(lay, y, axis=0)
-            lay[:y] = 0
+        if lay.shape[0] < Hh:
+            lay = np.concatenate([lay, np.zeros((Hh - lay.shape[0],) + lay.shape[1:], np.float32)], 0)
+        if y or abs(z - 1.0) > 1e-3:
+            cx, cy = c if c is not None else (Ww / 2, Hh / 2)
+            M = np.float32([[z, 0, cx - z * cx], [0, z, cy - z * cy + y]])
+            lay = cv2.warpAffine(lay, M, (Ww, Hh), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
         a = lay[..., 3:4]
         frame *= 1 - a
         frame += a * lay[..., :3] * tint
 
-    def walk(self, frame, travel, sky, tint=1.0, far_tint=None, horizon=0, layers=("far", "mid", "near")):
-        """horizon: px to push the layers down (a lower camera: more sky). sky None: draw over frame.
-        layers: which to draw (to put something between them, e.g. a giant behind the trees)."""
+    def walk(self, frame, travel, sky, tint=1.0, far_tint=None, horizon=0, layers=("far", "mid", "near"), dolly=1.0, crane=0.0, center=None):
+        """horizon: px to push all layers down (more sky). crane: px the camera is raised (each
+        layer drops by its depth: near ones most). dolly: a push-in (each layer grows by its depth:
+        near ones most). sky None: draw over frame. layers: which to draw (to put something in
+        between, e.g. a giant behind the trees)."""
         if sky is not None:
             frame[:] = sky
+        D = self.DEPTH
+
+        def zy(k):
+            return 1.0 + (dolly - 1.0) * D[k], int(horizon + crane * D[k])
         if "far" in layers:
             ft = tint if far_tint is None else far_tint
             h, w = self.far.shape[:2]
             x0 = int((w - frame.shape[1]) / 2 + 0.02 * travel) % max(1, w - frame.shape[1])
-            lay = self.far[:frame.shape[0], x0:x0 + frame.shape[1]].astype(np.float32)
-            if horizon:
-                lay = np.roll(lay, horizon, axis=0)
-                lay[:horizon] = 0
-            a = lay[..., 3:4]
-            frame *= 1 - a
-            frame += a * lay[..., :3] * ft
-        if "mid" in layers:
-            self._scroll(frame, self.layers["mid"], 0.16 * travel, tint, horizon)
-        if "near" in layers:
-            self._scroll(frame, self.layers["near"], 0.55 * travel, tint, horizon)
+            z, y = zy("far")
+            self._scroll(frame, self.far[:, x0:x0 + frame.shape[1]], 0, ft, y, z, center)
+        for k, sp in (("mid", 0.16), ("near", 0.55)):
+            if k in layers:
+                z, y = zy(k)
+                self._scroll(frame, self.layers[k], sp * travel, tint, y, z, center)
         return frame
 
-    def ferns(self, frame, travel, tint=1.0):
-        self._scroll(frame, self.layers["ferns"], 1.5 * travel, tint)
+    def ferns(self, frame, travel, tint=1.0, dolly=1.0, crane=0.0, center=None):
+        z = 1.0 + (dolly - 1.0) * self.DEPTH["ferns"]
+        self._scroll(frame, self.layers["ferns"], 1.5 * travel, tint, int(crane * self.DEPTH["ferns"]), z, center)
 
     def clearing(self, frame, sky, sun=1.0, moon=0.0, fire=0.0, blaze=0.0, tint=1.0):
         land = np.zeros_like(self.c_alpha.repeat(3, 2))

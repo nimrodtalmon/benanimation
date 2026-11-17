@@ -352,6 +352,9 @@ class Production:
         roll = rl * math.sin(2 * math.pi * t / 7.0) if rl else 0.0
         if "roll" in opts and rl:  # a shot's own roll is handheld: a faster sway on top
             roll += 0.35 * rl * math.sin(2 * math.pi * t / 1.3)
+        tl = opts.get("tilt", 0.0)  # opts tilt: a tilted horizon (Dutch angle), degrees, or (start, end)
+        if tl:
+            roll += tl[0] + (tl[1] - tl[0]) * k if isinstance(tl, (tuple, list)) else tl
         if self.parallax is not None:
             frame = self.parallax_bg(frame, z, (focus[0] + 8 * math.sin(t * 0.8), focus[1]))
         if self.keep_bg is not None:

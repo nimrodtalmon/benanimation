@@ -5,7 +5,8 @@ Wilds3D, drawn in the ink style), with the light, the sky and the weather follow
 
 moods: the light of the moment (crossfaded): MOODS below ("dawn", "day", "red", "storm", "ash",
   "blood", "night"), each a sky (puppet/skies.py) and how the land and the cast are lit.
-weather (all optional): rain/ash/embers/smoke/blaze/silhouette: [(t, amount), ...] keyframes (linear);
+weather (all optional): rain/ash/embers/smoke/blaze/silhouette/dissolve (the giant crumbling):
+  [(t, amount), ...] keyframes (linear);
   strikes: [(t, x)] lightning; birds: [(t, (x, y), toward)] flocks; shots: [t] gunshot flashes.
 giant: a factory for a cast member drawn huge BEHIND the trees in "giant" shots (between the
   far mountains and the near trees).
@@ -17,6 +18,7 @@ everything); anything else: the clearing.
 """
 import math
 
+import cv2
 import numpy as np
 
 from production import H, W
@@ -52,11 +54,13 @@ def key(keys, t, default=0.0):
 class Wilds(Venue):
     tv = (0.03, 0.12)
     dark, vignette = False, 0.4
+    travel = True  # the band gets walking shots too (walk_guitar...)
 
     def __init__(self, moods, weather=None, giant=None, seed=5, scenery="wilds", walk_speed=240.0, fade=1.5, shift=0.05):
         self.moods, self.wx_spec, self.giant_f = sorted(moods), dict(weather or {}), giant
         self.seed, self.scenery_name, self.walk_speed, self.fade, self.shift = seed, scenery, walk_speed, fade, shift
         self._giant = None
+        self.cams = []  # the side-on camera schedule [(t0, t1, dict(horizon, crane, dolly, speed))] (see cam())
 
     def bind(self, show):
         from scenery3d import Wilds3D
@@ -112,6 +116,20 @@ class Wilds(Venue):
             self._giant = self.giant_f()
         return self._giant
 
+    def cam(self, t):
+        """The side-on camera now: horizon (px, more sky), crane (px up, by depth), dolly (push-in,
+        by depth), speed (scroll factor), from the clip's camera schedule [(t0, t1, dict)] (each
+        value a number or a (start, end) pair eased over the span)."""
+        c = dict(horizon=0.0, crane=0.0, dolly=1.0, speed=1.0)
+        for a, b, d in self.cams:
+            if a <= t < b:
+                u = (t - a) / max(1e-6, b - a)
+                u = u * u * (3 - 2 * u)
+                for k, v in d.items():
+                    c[k] = v[0] + (v[1] - v[0]) * u if isinstance(v, (tuple, list)) else v
+                break
+        return c
+
     def frame(self, t, wide, cue):
         shot = cue["shot"]
         kd = self.kind(shot)
@@ -121,19 +139,42 @@ class Wilds(Venue):
         f = np.empty((H, W, 3), np.float32)
         if kd == "clearing":
             return self.scn.clearing(f, sky, sun=sun, moon=moon, blaze=blaze * self.flicker(t), tint=tint)
-        travel = self.walk_speed * t if kd in ("land", "walk") else 0.0
+        c = self.cam(t)
+        travel = self.walk_speed * c["speed"] * t if kd in ("land", "walk") else 0.0
         if kd == "giant":  # the giant stands behind the trees: sky, far mountains, him, then the trees
-            hz = 220
+            hz = 220 + c["horizon"]
             self.scn.walk(f, travel, sky, tint, horizon=hz, layers=("far",))
             g = self.giant()
             if g is not None:
-                g.draw(f, t)
+                dis = key(self.wx_spec.get("dissolve", []), t)
+                if dis <= 0:
+                    g.draw(f, t)
+                else:  # he crumbles: patches of him blow away as ash, glowing at the edges
+                    gf = f.copy()
+                    g.draw(gf, t)
+                    n = self._noise()
+                    edge = np.clip(1 - np.abs(n - dis) / 0.05, 0, 1)[..., None]
+                    keep = (n > dis)[..., None].astype(np.float32)
+                    f[:] = f * (1 - keep) + gf * keep
+                    f += edge * (np.abs(gf - f).max(2, keepdims=True) > 0.02) * np.array([0.1, 0.5, 1.0], np.float32)
+                    np.minimum(f, 1.0, out=f)
             self.scn.walk(f, travel, None, tint, horizon=hz, layers=("mid",))  # a far ridge of trees in front: his size
             return f
-        self.scn.walk(f, travel, sky, tint, horizon=160 if kd == "land" else 0)
+        hz = (160 if kd == "land" else 0) + c["horizon"]
+        self.scn.walk(f, travel, sky, tint, horizon=hz, dolly=c["dolly"], crane=c["crane"])
         if kd == "land":
-            self.scn.ferns(f, self.walk_speed * t, tint)
+            self.scn.ferns(f, self.walk_speed * c["speed"] * t, tint, dolly=c["dolly"], crane=c["crane"])
         return f
+
+    def _noise(self):
+        if getattr(self, "_nz", None) is None:
+            rng = np.random.default_rng(self.seed)
+            n = np.zeros((H, W), np.float32)
+            for o, sc in ((1.0, 24), (0.5, 60), (0.25, 160)):
+                g = rng.random((H // sc + 2, W // sc + 2)).astype(np.float32)
+                n += o * cv2.resize(g, (W, H), interpolation=cv2.INTER_CUBIC)
+            self._nz = (n - n.min()) / (n.max() - n.min())
+        return self._nz
 
     def flicker(self, t):
         return 1 + 0.12 * math.sin(11.3 * t) + 0.08 * math.sin(17.9 * t + 1) + 0.06 * math.sin(5.1 * t + 2)
@@ -163,7 +204,8 @@ class Wilds(Venue):
         story.EMIT.clear()
         self.light_cast(frame, cast * (1 + 0.8 * fl) + np.array([0.3, 0.6, 0.9], np.float32) * g)
         if kd in ("walk", "full"):
-            self.scn.ferns(frame, self.walk_speed * t if kd == "walk" else 0.0, tint)
+            c = self.cam(t)
+            self.scn.ferns(frame, self.walk_speed * c["speed"] * t if kd == "walk" else 0.0, tint, dolly=c["dolly"], crane=c["crane"])
         sm = key(w.get("smoke", []), t)
         if sm > 0:
             wx.smoke(frame, t, sm)

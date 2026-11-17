@@ -4,7 +4,8 @@ a 3D rifle (puppet/prop3d.py) in both hands instead of the mic.
   Hunter(song, scale, cx, top, walk=None, poses=[(t, "carry"), (t, "aim"), (t, "god")],
          shots=[t, ...], sing=[(t0, t1), ...], god=lambda t: 0..1)
 
-poses (a schedule; hands ease between them):
+toward: with walk, he walks toward the camera (stays in place, steps; pair it with a push-in).
+poses (a schedule; the rifle eases between them, the hands stay on it):
 - "carry": the rifle across his chest, muzzle up to the right (side view of the rifle)
 - "aim": the rifle on his right shoulder, pointed at us (the rifle's "aim" view); shots kick it up
   with a muzzle flash and a puff of smoke
@@ -25,11 +26,47 @@ from warp import W, H, over_sub, over
 GRIP = np.array([0.0, 0.44, -0.115])  # where a held stick sits in the fist (hand space, cast/distor.py mic)
 
 
+class _Pinned:
+    """A walk path seen from the front: he keeps his place on screen (x) but still walks (v)."""
+
+    def __init__(self, path, x):
+        self.p, self.x0 = path, x
+
+    def x(self, t):
+        return self.x0
+
+    def v(self, t):
+        return self.p.v(t)
+
+    def __getattr__(self, k):
+        return getattr(self.p, k)
+
+
+class _PinnedWalk:
+    """The walk cycle for a walk toward the camera: feet step in place, close under the hips
+    (their travel is toward us, so only a little of it shows sideways)."""
+
+    def __init__(self, walker, path, x, side=0.12, lift=3.0):
+        self.w, self.path, self.x0, self.side = walker, path, x, side
+        self.lift = walker.lift * lift  # the stepping foot rises on screen (the knee comes up toward us)
+
+    def feet(self, t):
+        out, bob, sp = self.w.feet(t)
+        x = self.path.x(t)
+        return {k: (self.x0 + self.side * (fx - x), lift) for k, (fx, lift) in out.items()}, bob, sp
+
+    def __getattr__(self, k):
+        return getattr(self.w, k)
+
+
 class Hunter(Singer):
     LEN = 1.75  # the rifle's length in shoulder widths (his arms are short: a cartoon rifle)
     def __init__(self, song=None, scale=0.5, cx=W / 2, top=60, walk=None, poses=((0.0, "carry"),), shots=(), sing=(), god=0.0,
-                 rifle="rifle", fluid=True, head=0.8, flash=1.0, aura=None):
+                 rifle="rifle", fluid=True, head=0.8, flash=1.0, aura=None, toward=False):
         super().__init__(song, scale=scale, cx=cx, top=top, walk=walk, fluid=fluid, head=head, pump_after=1e9)
+        self.toward = toward and walk is not None
+        if self.toward:  # walking toward the camera: the legs keep the walk's rhythm, he stays put
+            self.path, self.walker = _Pinned(walk, cx), _PinnedWalk(self.walker, walk, cx)
         from prop3d import Prop3D
         self.rifle = Prop3D(rifle)
         self.poses = sorted(poses)
@@ -44,7 +81,7 @@ class Hunter(Singer):
         mask = np.convolve(mask, np.ones(5) / 5, "same")
         self.env = self.env * mask
         self.sing = self.sing * (mask > 0.5)
-        self.hand_s = {"l": None, "r": None}
+        self.rig_s = None
         self.mid = self.mic_a0  # held stick axis on screen at yaw 0 (the mic's)
 
     # ---- the schedule
@@ -64,6 +101,8 @@ class Hunter(Singer):
 
     def look(self, t, turn, tilt):
         pose, since = self.pose_at(t)
+        if self.toward:  # he walks at us: he looks at us
+            turn = turn * 0.3
         if pose == "aim":  # looks along the barrel, up to the right
             k = min(1.0, since / 0.3)
             return turn * (1 - 0.8 * k) + 0.35 * k, tilt * (1 - k) - 6 * k
@@ -85,16 +124,24 @@ class Hunter(Singer):
         img, xy, frac = h.render(pose or handrig.POSES["fist"], R, size, target, anchor=anchor)
         return wrist, (img, xy, frac)
 
-    def _arm(self, frame, side, sh, wrist, s):
+    FORESHORT = (0.62, 0.8)  # holding something in front of the chest, the arms come toward us: shorter
+
+    def _arm(self, frame, side, sh, wrist, s, outward=True):
+        """An arm from the shoulder to the wrist, foreshortened, the elbow out to the side (holding
+        something in front of the body) rather than tucked in."""
+        from limb import ik
         L = self.arm_l if side == "l" else self.arm_r
-        E, Wr = L.solve(sh, wrist, s)
+        k0 = (L.up_k, L.fore_k)
+        L.up_k, L.fore_k = self.FORESHORT
+        L.solve_reach(sh, wrist, s)
+        E, Wr = ik(sh, wrist, L.L1 * s * L.up_k, L.L2 * s * L.fore_k, L.inner if outward else -L.inner)
         lay, (x, y) = L.render(sh, E, Wr, s, (W, H))
+        L.up_k, L.fore_k = k0
         return lay, x, y
 
     def draw_arms(self, frame, t, c):
         s = self.s
         shL, shR = c["shL"], c["shR"]
-        cen = (shL + shR) / 2
         sw = float(np.hypot(*(shR - shL)))
         down = np.array([0.0, 1.0])
         pose, since = self.pose_at(t)
@@ -106,27 +153,27 @@ class Hunter(Singer):
         breathe = math.sin(t * 1.7)
         draws = []
         muzzle = None
-        if pose == "carry":
-            grip = cen + np.array([-0.30 * sw, 0.98 * sw]) + down * (2 * breathe)
-            elev = 52 + sway
-            sc = self.LEN * sw / (117 * self.rifle.k)
-            M = self.rifle.matrix(grip, "grip", elev, sc)
-            fore = M[:, :2] @ self.rifle.anchors["fore"] + M[:, 2]
-            ax = -elev  # screen angle of the rifle axis (y down)
-            self.rifle.draw(frame, grip, "grip", elev, sc)
-            tl, tr = grip, fore
-            axl, axr = ax, ax
-        elif pose == "aim":  # shouldered, aimed up to the right (at the trees, the birds, the sky)
-            k = min(1.0, since / 0.25)
-            k = k * k * (3 - 2 * k)
-            elev = (8 + 16 * k) + 7 * kick
-            butt = shL + np.array([0.08 * sw, 0.14 * sw]) + np.array([-0.05, 0.03]) * sw * kick
-            butt = butt * k + (cen + np.array([-0.3 * sw, 0.95 * sw])) * (1 - k)
-            sc = self.LEN * sw / (117 * self.rifle.k)
-            self.rifle.draw(frame, butt, "butt", elev, sc)
-            tl = self.rifle.point("grip", butt, "butt", elev, sc)
-            tr = self.rifle.point("fore", butt, "butt", elev, sc)
-            muzzle = self.rifle.point("muzzle", butt, "butt", elev, sc)
+        sc = self.LEN * sw / (117 * self.rifle.k)
+        if pose in ("carry", "aim"):
+            # where the grip hand is and where the rifle points (the rifle follows the hands, smoothly;
+            # both hands then sit exactly on it)
+            if pose == "carry":  # across the body: right hand at the hip, left hand at the chest
+                G = shL + np.array([0.12, 0.72]) * sw + down * (2 * breathe)
+                elev = 32 + sway
+            else:  # tucked under the right arm, aimed up to the right
+                k = min(1.0, since / 0.25)
+                k = k * k * (3 - 2 * k)
+                G = shL + np.array([0.20, 0.30 + 0.42 * (1 - k)]) * sw + np.array([-0.04, -0.02]) * sw * kick
+                elev = 32 * (1 - k) + 22 * k + 8 * kick
+            if self.rig_s is None or abs(t - getattr(self, "_t_prev", t)) > 0.2:
+                self.rig_s = Spring(np.r_[G, elev], omega=16.0, zeta=0.85)
+            v = self.rig_s.at(np.r_[G, elev], t)
+            self._t_prev = t
+            G, elev = v[:2], float(v[2])
+            self.rifle.draw(frame, G, "grip", elev, sc)
+            tl = G
+            tr = self.rifle.point("fore", G, "grip", elev, sc)
+            muzzle = self.rifle.point("muzzle", G, "grip", elev, sc) if pose == "aim" else None
             axl = axr = -elev
         else:  # god: arms wide and up, hands open
             A = (self.arm_l.L1 + self.arm_l.L2) * s
@@ -146,21 +193,14 @@ class Hunter(Singer):
                 if lay is not None:
                     over(frame, lay, x, y)
             return
-        # springs keep the hands from jumping when the pose changes
-        for side, tg in (("l", tl), ("r", tr)):
-            if self.hand_s[side] is None or abs(t - getattr(self, "_t_prev", t)) > 0.2:
-                self.hand_s[side] = Spring(np.asarray(tg, float), omega=14.0, zeta=0.9)
-        tl = self.hand_s["l"].at(np.asarray(tl, float), t)
-        tr = self.hand_s["r"].at(np.asarray(tr, float), t)
-        self._t_prev = t
         for side, sh, tg, ax in (("r", shR, tr, axr), ("l", shL, tl, axl)):
             wrist, hand = self._hand(frame, side, tg, ax, hs)
             draws.append((side, sh, wrist, hand))
-        for side, sh, wrist, (img, xy, frac) in draws:
-            over_sub(frame, img, xy, frac)
+        for side, sh, wrist, (img, xy, frac) in draws:  # the arm, then the fist on top of its end
             lay, x, y = self._arm(frame, side, sh, wrist, s)
             if lay is not None:
                 over(frame, lay, x, y)
+            over_sub(frame, img, xy, frac)
         if muzzle is not None and u_shot is not None and u_shot < 0.6:
             self.muzzle_flash(frame, muzzle, u_shot, sw)
 

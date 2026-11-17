@@ -7,13 +7,17 @@
   Duotone(...)                             # a look: posterized two-color print with ink lines
   silhouette(frame, mask, amount, rim)     # the cast as black cut-outs with a rim of light
   label(img, text)                         # a small caption in a corner (e.g. which experiment)
+  Scope(render, shot, target, ...)         # a look through a rifle scope at another shot
+  Falling(player, t0)                      # a player hit: tips back and drops out of the picture
+  sfx(img, text, u, at)                    # comic lettering: "BANG!" popping in (u: seconds since)
+  close_page(img, u)                       # the picture closes like a comic book (u: 0..1)
 """
 import math
 
 import cv2
 import numpy as np
 
-from production import H, W
+from production import H, ROOT, W
 
 
 def cuts(bars, a, b, cycle, n=1, opts=None):
@@ -71,9 +75,12 @@ class Panels:
     panels slide in one after another from t0 (every `stagger` s)."""
     j = {"credit": "Drawing: Ben"}
 
-    def __init__(self, render, panels, t0, t1, paper=(0.86, 0.9, 0.93), border=7, stagger=0.35, tilt=0.0):
+    def __init__(self, render, panels, t0, t1, paper=(0.86, 0.9, 0.93), border=7, stagger=0.35, tilt=0.0, dive=None):
+        """dive: index of a panel the camera flies into over the shot's last 0.7 s (so the next
+        shot, full screen, continues it)."""
         self.render, self.panels, self.t0, self.t1 = render, panels, t0, t1
         self.paper, self.border, self.stagger, self.tilt = np.array(paper, np.float32), border, stagger, tilt
+        self.dive = dive
 
     def draw(self, frame, t):
         frame[:] = self.paper
@@ -104,7 +111,85 @@ class Panels:
             b = self.border
             cv2.rectangle(frame, (xa - b, Y - b), (xb + b - 1, Y + h + b - 1), (0.04, 0.04, 0.05), -1)
             frame[Y:Y + h, xa:xb] = img[:, xa - X:xb - X]
+        if self.dive is not None and t > self.t1 - 0.7:  # fly into one panel until it fills the screen
+            x, y, w, h = self.panels[self.dive][1]
+            u = min(1.0, (t - (self.t1 - 0.7)) / 0.7)
+            u = u * u * (3 - 2 * u)
+            z = 1 + (max(W / w, H / h) - 1) * u
+            cx, cy = (x + w / 2) * u + W / 2 * (1 - u), (y + h / 2) * u + H / 2 * (1 - u)
+            M = np.float32([[z, 0, W / 2 - z * cx], [0, z, H / 2 - z * cy]])
+            frame[:] = cv2.warpAffine(frame, M, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
         return frame
+
+
+class Scope:
+    """A look through a rifle scope: another shot (render(shot, t), like Panels) magnified around
+    target(t) (screen xy), in a black circle with a crosshair; the aim drifts with breathing and
+    settles; color: the reticle's (red reads as "he is the prey")."""
+    j = {"credit": "Drawing: Ben"}
+
+    def __init__(self, render, shot, target, mag=2.0, color=(0.05, 0.05, 0.05), seed=0, settle=None):
+        self.render, self.shot, self.target, self.mag, self.color = render, shot, target, mag, np.array(color, np.float32)
+        self.seed, self.settle = seed, settle
+        yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+        r = H * 0.46
+        d = np.sqrt((xx - W / 2) ** 2 + (yy - H / 2) ** 2)
+        self.mask = np.clip((r - d) / 3.0, 0, 1)[..., None]
+        self.vig = np.clip(1 - ((d / r) ** 4) * 0.55, 0, 1)[..., None]
+
+    def draw(self, frame, t):
+        tx, ty = self.target(t) if callable(self.target) else self.target
+        k = 1.0 if self.settle is None else max(0.15, min(1.0, (self.settle - t) / 1.5))
+        tx += k * (26 * math.sin(t * 1.3 + self.seed) + 9 * math.sin(t * 3.7))
+        ty += k * (18 * math.sin(t * 1.1 + 2 + self.seed) + 7 * math.sin(t * 4.3))
+        sub = self.render(self.shot, t)
+        z = self.mag
+        M = np.float32([[z, 0, W / 2 - z * tx], [0, z, H / 2 - z * ty]])
+        img = cv2.warpAffine(sub, M, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+        img = img * self.vig
+        frame[:] = img * self.mask + np.array([0.01, 0.01, 0.01], np.float32) * (1 - self.mask)
+        c = self.color
+        cx, cy, r = W // 2, H // 2, int(H * 0.46)
+        for (x0, y0, x1, y1, w) in ((cx - r, cy, cx - 40, cy, 3), (cx + 40, cy, cx + r, cy, 3), (cx, cy - r, cx, cy - 40, 3), (cx, cy + 40, cx, cy + r, 3),
+                                    (cx - r, cy, cx - int(r * 0.7), cy, 9), (cx + int(r * 0.7), cy, cx + r, cy, 9),
+                                    (cx, cy + int(r * 0.7), cx, cy + r, 9)):
+            cv2.line(frame, (x0, y0), (x1, y1), tuple(float(v) for v in c), w, cv2.LINE_AA)
+        for i in range(1, 4):  # range marks
+            cv2.line(frame, (cx - 14, cy + 40 + i * 34), (cx + 14, cy + 40 + i * 34), tuple(float(v) for v in c), 2, cv2.LINE_AA)
+        cv2.circle(frame, (cx, cy), 3, tuple(float(v) for v in c), -1, cv2.LINE_AA)
+        return frame
+
+
+class Falling:
+    """A player who is hit at t0: a jolt, then tips back and drops out of the bottom of the picture
+    over dur seconds; nothing after."""
+
+    def __init__(self, p, t0, dur=1.2, lean=-14.0):
+        self.p, self.t0, self.dur, self.lean = p, t0, dur, lean
+
+    def __getattr__(self, k):
+        return getattr(self.p, k)
+
+    def draw(self, frame, t):
+        u = (t - self.t0) / self.dur
+        if u <= 0:
+            return self.p.draw(frame, t)
+        if u >= 1:
+            return
+        lay = np.zeros_like(frame)
+        bg = frame.copy()
+        self.p.draw(bg, min(t, self.t0 + 0.05))  # frozen at the hit
+        m = (np.abs(bg - frame).max(2, keepdims=True) > 0.003).astype(np.float32)
+        lay = bg
+        e = u * u
+        ang = self.lean * min(1.0, u * 3) + self.lean * 2 * e
+        jolt = 18 * math.exp(-u * 12) * math.sin(u * 80)
+        M = cv2.getRotationMatrix2D((W / 2, H * 1.1), ang, 1.0)
+        M[0, 2] += jolt
+        M[1, 2] += e * H * 0.9
+        lay = cv2.warpAffine(lay * m, M, (W, H))
+        mm = cv2.warpAffine(m, M, (W, H))[..., None]
+        frame[:] = frame * (1 - mm) + lay
 
 
 class Duotone:
@@ -199,3 +284,61 @@ def ease(u):
 def slow_pan(a, b, dx=160, y=H * 0.42):
     """focus(t) for a long take: a slow pan across the shot."""
     return lambda t: (W / 2 + dx * (ease((t - a) / (b - a)) - 0.5), y + 10 * math.sin(t * 0.4))
+
+
+def sfx(img, text, u, at=(0.68, 0.3), size=150, angle=-8.0, fill=(40, 40, 225), burst=(70, 225, 255), dur=0.9):
+    """Comic lettering on a finished uint8 BGR frame: `text` bursting in (u: seconds since the
+    hit; gone after dur), a jagged burst behind it, black outline. at: center (share of W, H);
+    fill, burst: BGR 0..255."""
+    if not (0 <= u < dur):
+        return img
+    from PIL import Image, ImageDraw, ImageFont
+    pop = min(1.0, u / 0.08)
+    sc = (0.6 + 0.55 * pop) * (1 + 0.04 * math.sin(u * 40) * (1 - u / dur))
+    fade = min(1.0, (dur - u) / 0.25)
+    fs = int(size * sc)
+    if fs not in _fonts:
+        for p in (f"{ROOT}/public/fonts/bangers-latin-400-normal.woff",  # Bangers, SIL OFL (public/fonts/OFL-Bangers.txt)
+                  "/usr/share/fonts/truetype/google-fonts/Poppins-Bold.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"):
+            try:
+                _fonts[fs] = ImageFont.truetype(p, fs)
+                break
+            except OSError:
+                pass
+    font = _fonts[fs]
+    cx, cy = int(at[0] * W), int(at[1] * H)
+    lay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(lay)
+    tw = d.textlength(text, font=font)
+    rng = np.random.default_rng(len(text) * 7 + int(at[0] * 100))
+    R = tw * 0.62 + 30
+    pts = []
+    for i in range(26):  # the burst
+        a = 2 * math.pi * i / 26
+        rr = R * (1.0 if i % 2 == 0 else 0.72) * rng.uniform(0.9, 1.1)
+        pts.append((cx + rr * math.cos(a), cy + rr * 0.62 * math.sin(a)))
+    d.polygon(pts, fill=tuple(burst[::-1]) + (240,), outline=(10, 10, 10, 255), width=6)
+    d.text((cx - tw / 2, cy - fs * 0.62), text, font=font, fill=fill[::-1] + (255,), stroke_width=max(3, fs // 18), stroke_fill=(10, 10, 10, 255))
+    lay = lay.rotate(angle, center=(cx, cy), resample=Image.BICUBIC)
+    a = np.asarray(lay, np.float32)
+    al = a[..., 3:4] / 255 * fade
+    rgb = a[..., :3][..., ::-1]
+    f = img.astype(np.float32)
+    img[:] = np.clip(f * (1 - al) + rgb * al, 0, 255).astype(np.uint8)
+    return img
+
+
+def close_page(img, u):
+    """The picture closes like a comic book: it folds shut from the right toward the spine at
+    the left, darkening, onto black (u: 0..1)."""
+    if u <= 0:
+        return img
+    u = min(1.0, u)
+    e = u * u * (3 - 2 * u)
+    w = max(1, int(W * (1 - e)))
+    out = np.zeros_like(img)
+    page = cv2.resize(img, (w, H), interpolation=cv2.INTER_AREA).astype(np.float32)
+    shade = np.linspace(1.0, 1.0 - 0.7 * e, w, dtype=np.float32)[None, :, None]
+    out[:, :w] = np.clip(page * shade * (1 - 0.3 * e), 0, 255).astype(np.uint8)
+    img[:] = out
+    return img
