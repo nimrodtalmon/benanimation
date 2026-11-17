@@ -25,7 +25,8 @@ New session: read `docs/GUIDE.md` (how to make a clip), then this file; `docs/TO
 
 - New (Nov 17, round 15): `clips/achzar`, Nimrod's own song (Hoodska, "Tsayad Achzar"; his rights; the mp3 is kept
   out of the public repo until he says otherwise), the hunt story with six captioned experiments: classic cuts, long
-  takes, comic panels, beat cuts, noir duotone on twos, silhouettes on worn tape. Waiting for his picks.
+  takes, comic panels, beat cuts, noir duotone on twos, silhouettes on worn tape. Rendered (out/achzar.mp4, ~1.5 h on
+  2 cores); waiting for his picks. Slow spot: the extreme close-up (hunter_eye, scale 1.9) takes ~12 s a frame.
   Fix: Production now tells the venue the background after the parallax warp (`keep_bg`), so `light_cast` /
   `cast_mask` see only the cast (before, the warp made every pixel look like cast: whole-frame tints).
 

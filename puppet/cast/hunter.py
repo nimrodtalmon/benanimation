@@ -171,7 +171,7 @@ class Hunter(Singer):
             lay = np.zeros((H, W), np.float32)
             n = 9
             pts = []
-            rng = np.random.default_rng(int(p[0]) + int(u * 1000))
+            rng = np.random.default_rng(abs(int(p[0])) + int(u * 1000))
             for i in range(2 * n):
                 a = math.pi * i / n + 0.2
                 rr = r * (1.0 if i % 2 == 0 else 0.32) * rng.uniform(0.7, 1.15)
