@@ -107,11 +107,16 @@ For a different story, either:
   `whip=±1`, `look=False`.
 - A story clip (not a band show): subclass `Show`, add cast in `make_cast()` and write `plan()` act by act from the
   song's times (see `clips/hunt/clip.py`, `clips/achzar/clip.py`). `puppet/story.py` has the pieces: `cuts()` /
-  `beat_cuts()` (n-bar / n-beat shots taking turns), `Empty`, `Rising`, `Panels` (comic panels: several shots at once),
-  `Duotone` (a two-ink print look), `silhouette()` + `emit()` (black cut-outs; glowing eyes shine through), `label()`.
+  `beat_cuts()` (n-bar / n-beat shots taking turns), `Empty`, `Rising`, `Falling` (hit: tips back, drops out),
+  `Panels` (comic pages: several shots at once; `dive=i` flies into panel i), `Scope` (a look through a rifle scope at
+  another shot; red reticle = "he is the prey"), `Duotone` (two-ink print look), `silhouette()` + `emit()` (black
+  cut-outs; glowing eyes shine through), `sfx()` (comic lettering "BANG!"), `close_page()` (the book closes), `label()`.
+- Side-on camera moves in `Wilds`: `venue.cams.append((t0, t1, dict(crane=(1150, 0), dolly=(1, 1.9), horizon=380,
+  speed=2.5)))`: crane down from the sky, a push-in with real depth (near layers grow most), low horizon (looking
+  up), faster scroll (a chase). `Hunter(toward=True, walk=Path(...))`: he walks at the camera (pair with a zoom).
 - Per-shot opts (Production): `zoom`, `focus`, `drift`, `punch=(times, amount)`, `roll` (handheld sway), `twos` (on
   twos), `look` (False, or a look of its own, e.g. `story.Duotone()` or `Looks(HandDrawn(), TVStatic(0.14, vhs=0.9))`),
-  `whip`, `tmap`. `clips/achzar` tries a different way of filming in each part (captioned) to compare them.
+  `whip`, `tmap`, `tilt` (Dutch angle, degrees). `clips/achzar` tries different camera work in each part (captioned).
 - For something not band-shaped at all, use `Production` directly (see `clips/legacy/` for examples).
 
 ## 6. One look: drawn

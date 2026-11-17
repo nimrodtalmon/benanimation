@@ -27,6 +27,11 @@ New session: read `docs/GUIDE.md` (how to make a clip), then this file; `docs/TO
   out of the public repo until he says otherwise), the hunt story with six captioned experiments: classic cuts, long
   takes, comic panels, beat cuts, noir duotone on twos, silhouettes on worn tape. Rendered (out/achzar.mp4, ~1.5 h on
   2 cores); waiting for his picks. Slow spot: the extreme close-up (hunter_eye, scale 1.9) takes ~12 s a frame.
+  Round 2 (his feedback: likes the comics; hand on rifle and walking were off; more camera variety; a better story):
+  new story (scope, the bassist shot and back, the hunter hunted by the storm, the god crumbles to ash, dawn, the
+  book closes); comic lettering and pages throughout; rifle: the rifle follows a smoothed pose and both fists sit on
+  it, arms foreshortened with elbows out; walking: front-facing walks are now toward the camera (no sideways
+  crab-walk with crossing legs).
   Fix: Production now tells the venue the background after the parallax warp (`keep_bg`), so `light_cast` /
   `cast_mask` see only the cast (before, the warp made every pixel look like cast: whole-frame tints).
 
